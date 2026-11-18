@@ -101,7 +101,7 @@ sub over( @{[ join ', ', @params ]} ) :returns(i64) {
     my i64 \$s = $sum;
     return \$s;
 }
-return over( @{[ join ', ', @args ]} );
+exit over( @{[ join ', ', @args ]} );
 BROCKEN
     return ( $src, $n );
 }
@@ -130,7 +130,7 @@ sub mixed( @{[ join ', ', map {"f64 \$f$_"} 0 .. $mix_n - 1 ]}, i64 \$j ) :retur
     my i64 \$s = \$j;
     return \$s;
 }
-return mixed( @{[ join ', ', map { ( $_ + 1 ) . '.0' } 0 .. $mix_n - 1 ]}, 42 );
+exit mixed( @{[ join ', ', map { ( $_ + 1 ) . '.0' } 0 .. $mix_n - 1 ]}, 42 );
 BROCKEN
     my ( undef, $mmf ) = lowered( $triple, $class, $mix );
     my ($mcallee) = grep {/^mixed/} keys %$mmf;
@@ -304,14 +304,14 @@ sub exec_pairs () {
                     $sum += $v;
                 }
             }
-            my $src = sprintf "sub g(%s) :returns(f64) { return %s; } return g(%s);", join( ', ', @params ), join( ' + ', @terms ),
+            my $src = sprintf "sub g(%s) :returns(f64) { return %s; } exit g(%s);", join( ', ', @params ), join( ' + ', @terms ),
                 join( ', ', @args );
             my $name = sprintf '%s: %d integer and %d floating-point arguments arrive intact', $triple, $nint, $nfloat;
             run_case( $platform, $class, $src, $sum, $name );
 
             # A float return read out of a general register came back as the first float the caller passed, which is a
             # wrong answer that no offset check can see.
-            my $ret = "sub h(f64 \$a, f64 \$b) :returns(f64) { return \$b; } return h(1.0, 6.0);";
+            my $ret = "sub h(f64 \$a, f64 \$b) :returns(f64) { return \$b; } exit h(1.0, 6.0);";
             run_case( $platform, $class, $ret, 6, "$triple: a floating-point return lands in the floating-point return register" );
         }
     }

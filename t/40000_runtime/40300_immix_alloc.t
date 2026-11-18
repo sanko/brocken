@@ -20,7 +20,7 @@ class Point {
 }
 my ptr $p1 = Point->new(x => 10);
 my ptr $p2 = Point->new(x => 32);
-return $p1->x() + $p2->x();
+exit $p1->x() + $p2->x();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/i_multi_class' . $brocken->ext;
@@ -41,7 +41,7 @@ class Counter {
 }
 my ptr $c = Counter->new(count => 0);
 $c->set_count(21);
-return $c->count() * 2;
+exit $c->count() * 2;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/i_writer' . $brocken->ext;
@@ -67,7 +67,7 @@ while ($i < 10) {
     $s = $s + $p->x();
     $i = $i + 1;
 }
-return $s;
+exit $s;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/i_many_class' . $brocken->ext;
@@ -88,7 +88,7 @@ class Point {
     field i64 $y :param :reader;
 }
 my ptr $p = Point->new(x => 10, y => 32);
-return $p->x() + $p->y();
+exit $p->x() + $p->y();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/i_multi_field' . $brocken->ext;

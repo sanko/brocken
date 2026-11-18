@@ -64,7 +64,7 @@ sub f($params) :returns(i64) {
     my i64 \$s = $body;
     return \$s;
 }
-return f(@{[ join ', ', @args ]});
+exit f(@{[ join ', ', @args ]});
 BROCKEN
 }
 sub expected_sum($n) { return ( 7 * $n * ( $n + 1 ) / 2 ) & 0xFF }

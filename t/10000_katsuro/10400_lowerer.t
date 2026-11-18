@@ -55,10 +55,12 @@ BROCKEN
 subtest 'Return constant' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
-return 42;
+sub f() :returns(i64) {
+    return 42;
+}
 BROCKEN
-    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
-    ok( $f, 'found entry function' );
+    my $f = find_function( $mod, 'f' );
+    ok( $f, 'found function f' );
     my $text = $f->as_string();
     like( $text, qr/ret\s+i64\s+42/, 'returns constant 42' );
 };
@@ -68,7 +70,7 @@ subtest 'Variable declaration and assignment' => sub {
 my i64 $x = 10;
 my i64 $y;
 $y = 20;
-return $x;
+exit $x;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -82,7 +84,7 @@ subtest 'Binary arithmetic with precedence' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $r = 1 + 2 * 3;
-return $r;
+exit $r;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -99,7 +101,7 @@ if ($x) {
 } else {
     $x = 2;
 }
-return $x;
+exit $x;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -115,7 +117,7 @@ my i64 $i = 0;
 while ($i < 10) {
     $i = $i + 1;
 }
-return $i;
+exit $i;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -129,11 +131,11 @@ subtest 'Comparison operators' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $a = 10;
 my i64 $b = 20;
-if ($a == $b) { return 1; }
-if ($a != $b) { return 2; }
-if ($a < $b)  { return 3; }
-if ($a > $b)  { return 4; }
-return 0;
+if ($a == $b) { exit 1; }
+if ($a != $b) { exit 2; }
+if ($a < $b)  { exit 3; }
+if ($a > $b)  { exit 4; }
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -147,8 +149,8 @@ subtest 'Unary negation and logical not' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $a = -5;
-if (! $a) { return 1; }
-return 0;
+if (! $a) { exit 1; }
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -160,7 +162,7 @@ subtest 'Intrinsic calls' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my ptr $p = 0;
 my ptr $q = Brocken::ptr_add($p, 16);
-return 0;
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -177,7 +179,7 @@ subtest 'Bitwise intrinsics' => sub {
     ) {
         my ( $name, $op, $src ) = @$tc;
         my $c   = Brocken->new;
-        my $mod = $c->compile("my i64 \$x = $src;\nreturn \$x;\n");
+        my $mod = $c->compile("my i64 \$x = $src;\nexit \$x;\n");
         my $f   = find_function( $mod, '_BROCKEN_ENTRY' );
         ok( $f, "found entry function for $name" );
         my $text = $f->as_string();
@@ -188,7 +190,7 @@ subtest 'Syscall intrinsic' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $ret = Brocken::syscall(0, 0, 0, 0);
-return 0;
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -257,7 +259,7 @@ class Point {
     field i64 $_x :param(amount) :reader(get_x) :writer(write_x);
 }
 my ptr $p = Point->new(amount => 3);
-return $p->get_x();
+exit $p->get_x();
 BROCKEN
     ok( find_function( $mod,  'Point::get_x' ),   'reader is named get_x, not x' );
     ok( find_function( $mod,  'Point::write_x' ), 'writer is named write_x, not set__x' );
@@ -273,7 +275,7 @@ class Point {
     field i64 $_coordinate :param :reader :writer;
 }
 my ptr $p = Point->new(coordinate => 5);
-return $p->coordinate();
+exit $p->coordinate();
 BROCKEN
     ok( find_function( $mod,  'Point::coordinate' ),     'reader name has the leading underscore stripped' );
     ok( find_function( $mod,  'Point::set_coordinate' ), 'writer name is set_ plus the stripped name' );
@@ -288,7 +290,7 @@ class Counter {
     field i64 $count :param ||= 3;
 }
 my ptr $a = Counter->new(count => 0);
-return 1;
+exit 1;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
@@ -301,7 +303,7 @@ subtest '//= on a ptr lowers to a null-check select' => sub {
 my ptr $p;
 my ptr $b = 100;
 $p //= $b;
-return 0;
+exit 0;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
@@ -313,7 +315,7 @@ subtest '//= on a native scalar is a plain store' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $x = 0;
 $x //= 42;
-return $x;
+exit $x;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
@@ -325,7 +327,7 @@ subtest '||= on a native scalar lowers to a zero-check select' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $x = 0;
 $x ||= 5;
-return $x;
+exit $x;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
@@ -338,7 +340,7 @@ subtest '//= on a dynamic slot lowers to a conditional owned store' => sub {
 my Any $a;
 my Any $b = 100;
 $a //= $b;
-return 0;
+exit 0;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
@@ -355,7 +357,7 @@ subtest '||= on a dynamic slot also lowers to a conditional owned store' => sub 
 my Any $a = 1;
 my Any $b = 2;
 $a ||= $b;
-return 0;
+exit 0;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
@@ -368,7 +370,7 @@ subtest '// in expression position lowers to a defined-check select' => sub {
 my ptr $a;
 my ptr $b;
 my ptr $c = $a // $b;
-return 0;
+exit 0;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
@@ -418,7 +420,7 @@ class Point {
     field i64 $x;
 }
 my ptr $p = Point->new(x => 42);
-return $p->x;
+exit $p->x;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -468,7 +470,7 @@ subtest 'Function calls' => sub {
 sub helper() :returns(i64) {
     return 42;
 }
-return helper();
+exit helper();
 BROCKEN
     is( $mod->functions->@*, 157,
         '157 functions (106 runtime incl. gate_table/host_icb + eh_stack/thrown_val + free_big + stack_limit accessors + 11 array helpers + 5 block-geometry helpers + decref_obj/free_obj + gc_scan_class/gc_restore_class + str_trim/str_is_space + 19 hash/list helpers incl. mark_span + 14 increment helpers + is_truthy + unbox_ptr + helper + entry)'
@@ -482,7 +484,7 @@ subtest 'Omitted trailing parameters are filled with their defaults at the call 
 sub add(i64 $a = 3, i64 $b = 4) :returns(i64) {
     return $a + $b;
 }
-return add();
+exit add();
 BROCKEN
     my $text = $mod->as_string();
     like( $text, qr/call\s+i64\s+\@add\s*\([^)]*i64\s+3[^)]*i64\s+4/, 'both defaults materialised as literal i64 args' );
@@ -525,7 +527,7 @@ class Point {
 }
 my ptr $p = Point->new(x => 42);
 $p->x;
-return $p->x;
+exit $p->x;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -542,7 +544,7 @@ class Point {
 sub make() :returns(Point) {
     return Point->new(x => 42);
 }
-return make()->x;
+exit make()->x;
 BROCKEN
     my $make = find_function( $mod, 'make' );
     ok( $make, 'found function make' );
@@ -561,7 +563,7 @@ subtest 'Array declaration and element read' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my [i64; 10] @arr;
-return @arr[3];
+exit @arr[3];
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -577,7 +579,7 @@ subtest 'Array element write' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my [i64; 5] @arr;
 @arr[2] = 42;
-return @arr[2];
+exit @arr[2];
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -591,7 +593,7 @@ subtest 'Top-level code becomes entry function' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $x = 10;
 my i64 $y = 20;
-return $x + $y;
+exit $x + $y;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'entry function created from top-level code' );
@@ -610,7 +612,7 @@ subtest 'Top-level code with array' => sub {
 my [i64; 3] @arr;
 @arr[0] = 10;
 @arr[1] = 20;
-return @arr[0] + @arr[1];
+exit @arr[0] + @arr[1];
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'entry function with array' );
@@ -623,7 +625,7 @@ subtest 'int type lowers to i64' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my int $x = 42;
-return $x;
+exit $x;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
@@ -637,7 +639,7 @@ subtest 'bool type lowers to i1' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my bool $flag = 1;
-return 0;
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
@@ -647,11 +649,13 @@ BROCKEN
 subtest 'u64 type variable' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
-my u64 $x = 100;
-return $x;
+sub f() :returns(u64) {
+    my u64 $x = 100;
+    return $x;
+}
 BROCKEN
-    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
-    ok( $f, 'found entry' );
+    my $f = find_function( $mod, 'f' );
+    ok( $f, 'found function f' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+u64/,      'u64 variable is u64 alloca' );
     like( $text, qr/store\s+i64\s+100/, 'u64 store as i64 (literal)' );
@@ -663,7 +667,7 @@ subtest 'u8 and u16 type variables' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my u8 $a = 10;
 my u16 $b = 20;
-return 0;
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
@@ -675,7 +679,7 @@ subtest 'u32 type variable' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my u32 $x = 50;
-return 0;
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
@@ -686,7 +690,7 @@ subtest 'Int alias (capital I) lowers to i64' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my Int $x = 7;
-return $x;
+exit $x;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
@@ -697,7 +701,7 @@ subtest 'Bool alias (capital B) lowers to i1' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my Bool $flag = 1;
-return 0;
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
@@ -709,7 +713,7 @@ subtest 'unsigned widening emits zext' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my u8 $small = 200;
 my i64 $big = $small;
-return $big;
+exit $big;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
@@ -720,7 +724,7 @@ subtest 'bool widening emits zext (not sext)' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my bool $flag = 1;
-return $flag;
+exit $flag;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
@@ -736,7 +740,7 @@ my i64 $b = 8 >> 1;
 my u32 $c = 16;
 my u32 $d = 32 >> 2;
 my u64 $e = $c >> 1;
-return $a + $b + $d + $e;
+exit $a + $b + $d + $e;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -750,7 +754,7 @@ subtest 'signed widening emits sext' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my i8 $small = -5;
 my i64 $big = $small;
-return $big;
+exit $big;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
@@ -808,21 +812,21 @@ BROCKEN
 };
 subtest 'syscall_by_name errors without platform' => sub {
     my $c = Brocken->new;
-    eval { $c->compile( 'return Brocken::syscall_by_name("exit", 0);', 'test.br' ) };
+    eval { $c->compile( 'exit Brocken::syscall_by_name("exit", 0);', 'test.br' ) };
     ok( $@, 'error thrown without platform' );
     like( $@, qr/platform/, 'error mentions platform' );
 };
 subtest 'syscall_by_name errors on unknown syscall name' => sub {
     my $platform = Brocken::Katsuro::Platform::parse();
     my $c        = Brocken->new;
-    eval { $c->compile( 'return Brocken::syscall_by_name("nonexistent", 0);', 'test.br', $platform ) };
+    eval { $c->compile( 'exit Brocken::syscall_by_name("nonexistent", 0);', 'test.br', $platform ) };
     ok( $@, 'error thrown for unknown syscall name' );
     like( $@, qr/nonexistent/, 'error mentions unknown name' );
 };
 subtest 'syscall_by_name errors on non-string first argument' => sub {
     my $platform = Brocken::Katsuro::Platform::parse();
     my $c        = Brocken->new;
-    eval { $c->compile( 'return Brocken::syscall_by_name(42, 0);', 'test.br', $platform ) };
+    eval { $c->compile( 'exit Brocken::syscall_by_name(42, 0);', 'test.br', $platform ) };
     ok( $@, 'error thrown for non-string argument' );
     like( $@, qr/string/, 'error mentions string literal requirement' );
 };
@@ -842,7 +846,7 @@ BROCKEN
 };
 subtest 'libc intrinsic errors on non-string first argument' => sub {
     my $c = Brocken->new;
-    eval { $c->compile( 'return Brocken::libc(42, 1, 0);', 'test.br' ) };
+    eval { $c->compile( 'exit Brocken::libc(42, 1, 0);', 'test.br' ) };
     ok( $@, 'error thrown for non-string argument' );
     like( $@, qr/string/, 'error mentions string literal requirement' );
 };
@@ -853,9 +857,9 @@ use feature 'brocken_native_types';
 my u8 $a = 227;
 my i8 $b = -73;
 if ($a > $b) {
-    return 1;
+    exit 1;
 }
-return 0;
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -871,9 +875,9 @@ use feature 'brocken_native_types';
 my i8 $a = -1;
 my u8 $b = 0;
 if ($a < $b) {
-    return 1;
+    exit 1;
 }
-return 0;
+exit 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -888,7 +892,7 @@ subtest 'Mixed-width signed/unsigned promotion lands at the target width' => sub
 use feature 'brocken_native_types';
 my i8 $a = -61;
 my u16 $b = 65509;
-return $a >= $b ? 1 : 0;
+exit $a >= $b ? 1 : 0;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -926,7 +930,7 @@ subtest 'Mixed-width signed/unsigned comparisons agree with the widened values' 
     for my $case (@cases) {
         my ( $lt, $lv, $rt, $rv, $op, $want ) = @$case;
         my $label = "$lt $lv $op $rt $rv";
-        my $src   = "my $lt \$a = $lv; my $rt \$b = $rv; return \$a $op \$b ? 1 : 0;";
+        my $src   = "my $lt \$a = $lv; my $rt \$b = $rv; exit \$a $op \$b ? 1 : 0;";
         my $mod   = eval { $host->compile($src) };
         if ($@) { fail("$label: compile died: $@"); next }
         my $file = temp_path('mixedwidth') . $host->ext;
@@ -939,7 +943,7 @@ subtest 'Bool negation promotes i1 to i8' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 my bool $b = true;
 my i64 $v = -$b;
-return $v;
+exit $v;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -953,7 +957,7 @@ subtest 'i1 negation double-negate preserves value' => sub {
 my i1 $b = true;
 $b = -$b;
 $b = -$b;
-return $b;
+exit $b;
 BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
@@ -970,7 +974,7 @@ subtest 'bool handed a non-boolean value is promoted to Any and warns' => sub {
         $mod = $c->compile(<<'BROCKEN');
 my bool $b = false;
 $b = $b || -26;
-return $b;
+exit $b;
 BROCKEN
     }
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
@@ -985,7 +989,7 @@ subtest 'A forward class declaration does not clobber a definition' => sub {
 class P;
 class P { field i64 $x :param :reader; }
 my ptr $p = P->new(7);
-return $p->x();
+exit $p->x();
 BROCKEN
     ok( find_function( $mod, 'P::x' ), 'the definition after the forward declaration registers its reader' );
     my $c2   = Brocken->new;
@@ -993,7 +997,7 @@ BROCKEN
 class Q { field i64 $y :param :reader; }
 class Q;
 my ptr $q = Q->new(8);
-return $q->y();
+exit $q->y();
 BROCKEN
     ok( find_function( $mod2, 'Q::y' ), 'a forward declaration after the definition keeps the field' );
 };

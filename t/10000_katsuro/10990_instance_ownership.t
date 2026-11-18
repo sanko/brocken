@@ -34,9 +34,9 @@ my i64 $before = Brocken::Runtime::free16_count($hb);
     my ptr $v = Victim->new(probe => $p);
 }
 my i64 $after = Brocken::Runtime::free16_count($hb);
-if ($p->hit() != 1) { return 1; }
-if ($after <= $before) { return 2; }
-return 0;
+if ($p->hit() != 1) { exit 1; }
+if ($after <= $before) { exit 2; }
+exit 0;
 BROCKEN
         0, 'DESTROY ran exactly once and the instance was reclaimed', %native
     );
@@ -53,8 +53,8 @@ my ptr $p = Probe->new();
     my ptr $v = Victim->new(probe => $p);
     peek($v);
 }
-if ($p->hit() != 0) { return 1; }
-return 0;
+if ($p->hit() != 0) { exit 1; }
+exit 0;
 BROCKEN
         0, 'the escaped instance was not finalized while still reachable', %native
     );
@@ -72,8 +72,8 @@ my i64 $before = Brocken::Runtime::free16_count($hb);
     my ptr $h = Holder->new(box => 7);
 }
 my i64 $after = Brocken::Runtime::free16_count($hb);
-if ($after <= $before) { return 1; }
-return 0;
+if ($after <= $before) { exit 1; }
+exit 0;
 BROCKEN
         0, 'the owned dynamic field is released with the instance', %native
     );
@@ -91,8 +91,8 @@ my i64 $before = Brocken::Runtime::free16_count($hb);
     my ptr $o = Plain->new(a => 1, b => 2);
 }
 my i64 $after = Brocken::Runtime::free16_count($hb);
-if ($after <= $before) { return 1; }
-return 0;
+if ($after <= $before) { exit 1; }
+exit 0;
 BROCKEN
         0, 'plain class teardown releases its dynamic fields', %native
     );

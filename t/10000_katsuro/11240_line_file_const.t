@@ -21,27 +21,30 @@ sub answers ( $source, $want, $label ) {
 sub return_expr {
     my ($source) = @_;
     my $prog = Brocken->new->parse( $source, @_[ 1 .. $#_ ] );
-    return $prog->statements->[0]->expr;
+
+    # `exit EXPR` carries the same expression a `return EXPR` would; these checks are parse-only, so they read the
+    # `Exit` statement's `code`.
+    return $prog->statements->[0]->code;
 }
 subtest '__LINE__ folds to the token line' => sub {
-    is( return_expr('return __LINE__;')->value,     1, 'the first line is line 1' );
-    is( return_expr("\nreturn __LINE__;")->value,   2, 'a leading newline shifts the count' );
-    is( return_expr("\n\nreturn __LINE__;")->value, 3, 'two leading newlines' );
-    my $prog = Brocken->new->parse("return 0;\nreturn __LINE__;");
-    is( $prog->statements->[1]->expr->value, 2, 'the second statement is on line 2' );
+    is( return_expr('exit __LINE__;')->value,     1, 'the first line is line 1' );
+    is( return_expr("\nexit __LINE__;")->value,   2, 'a leading newline shifts the count' );
+    is( return_expr("\n\nexit __LINE__;")->value, 3, 'two leading newlines' );
+    my $prog = Brocken->new->parse("exit 0;\nexit __LINE__;");
+    is( $prog->statements->[1]->code->value, 2, 'the second statement is on line 2' );
 };
 subtest '__FILE__ folds to the compilation unit name' => sub {
-    is( return_expr('return __FILE__;')->value,                   '(eval)',       'the default filename' );
-    is( return_expr( 'return __FILE__;', 'src/thing.bk' )->value, 'src/thing.bk', 'a caller-supplied filename' );
+    is( return_expr('exit __FILE__;')->value,                   '(eval)',       'the default filename' );
+    is( return_expr( 'exit __FILE__;', 'src/thing.bk' )->value, 'src/thing.bk', 'a caller-supplied filename' );
 };
 subtest '__PACKAGE__ also parses to a string constant' => sub {
-    my $prog = Brocken->new->parse('package P; return __PACKAGE__;');
-    is( $prog->statements->[1]->expr->value, 'P', 'the enclosing package' );
+    my $prog = Brocken->new->parse('package P; exit __PACKAGE__;');
+    is( $prog->statements->[1]->code->value, 'P', 'the enclosing package' );
 };
 subtest '__LINE__ and __FILE__ run' => sub {
-    answers( 'return __LINE__;',                                          1, 'a line number is returned as an integer' );
-    answers( "\nreturn __LINE__;",                                        2, 'the shifted line number' );
-    answers( 'return __FILE__ eq "(eval)" ? 1 : 0;',                      1, 'the filename is the compilation unit name' );
-    answers( 'return (__FILE__ . ":" . __LINE__) eq "(eval):1" ? 1 : 0;', 1, 'both in one expression' );
+    answers( 'exit __LINE__;',                                          1, 'a line number is returned as an integer' );
+    answers( "\nexit __LINE__;",                                        2, 'the shifted line number' );
+    answers( 'exit __FILE__ eq "(eval)" ? 1 : 0;',                      1, 'the filename is the compilation unit name' );
+    answers( 'exit (__FILE__ . ":" . __LINE__) eq "(eval):1" ? 1 : 0;', 1, 'both in one expression' );
 };
 done_testing;

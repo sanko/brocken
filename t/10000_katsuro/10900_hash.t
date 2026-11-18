@@ -81,7 +81,7 @@ class Point {
     field i64 $y;
 }
 my ptr $p = Point->new(x => 3, y => 4);
-return $p->x + $p->y;
+exit $p->x + $p->y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/hash_named_ctor' . $brocken->ext;
@@ -102,7 +102,7 @@ class Point {
     field i64 $y :param;
 }
 my ptr $p = Point->new(x => 5, y => 6);
-return $p->x + $p->y;
+exit $p->x + $p->y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/hash_named_param_ctor' . $brocken->ext;
@@ -123,7 +123,7 @@ class Point {
     field i64 $y :param;
 }
 my ptr $p = Point->new(4, 9);
-return $p->x + $p->y;
+exit $p->x + $p->y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/pos_param_ctor' . $brocken->ext;
@@ -144,7 +144,7 @@ class Point {
     field i64 $y :param;
 }
 my ptr $p = Point->new(4, y => 9);
-return $p->x + $p->y;
+exit $p->x + $p->y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/mixed_param_ctor' . $brocken->ext;

@@ -23,22 +23,22 @@ my $obj = 42;
 my ptr $addr = Brocken::ptr_add($obj, 0);
 # Read initial GC flags (fresh Any has flags = 0)
 my i64 $flags = Brocken::Runtime::get_gc_flags($addr);
-if ($flags != 0) { return 1; }
+if ($flags != 0) { exit 1; }
 # Set flags to 0x15 (Suspect | Leaf | BRC_0)
 Brocken::Runtime::set_gc_flags($addr, 21);
 $flags = Brocken::Runtime::get_gc_flags($addr);
-if ($flags != 21) { return 2; }
+if ($flags != 21) { exit 2; }
 # Verify refcount and tag are preserved
 my i64 $header = Brocken::load_i64($addr);
 my i64 $rc = Brocken::band($header, 65535);
 my i64 $tag = Brocken::band(Brocken::shr($header, 24), 255);
-if ($rc == 0) { return 3; }
-if ($tag != 2) { return 4; }
+if ($rc == 0) { exit 3; }
+if ($tag != 2) { exit 4; }
 # Clear flags back to 0
 Brocken::Runtime::set_gc_flags($addr, 0);
 $flags = Brocken::Runtime::get_gc_flags($addr);
-if ($flags != 0) { return 5; }
-return 0;
+if ($flags != 0) { exit 5; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_gc_flags' . $brocken->ext;
@@ -57,7 +57,7 @@ SKIP: {
 my ptr $hb = Brocken::heap_base();
 # Suspect buffer should be empty
 my i64 $sc = Brocken::Runtime::suspect_count($hb);
-if ($sc != 0) { return 1; }
+if ($sc != 0) { exit 1; }
 # Create an Any-typed variable (heap-allocated)
 my $obj = 42;
 my ptr $addr = Brocken::ptr_add($obj, 0);
@@ -65,13 +65,13 @@ my ptr $addr = Brocken::ptr_add($obj, 0);
 Brocken::Runtime::push_suspect_buffer($addr, $hb);
 # Count should be 1
 $sc = Brocken::Runtime::suspect_count($hb);
-if ($sc != 1) { return 2; }
+if ($sc != 1) { exit 2; }
 # Buffered flag (bit 1) should be set
 my i64 $flags = Brocken::Runtime::get_gc_flags($addr);
-if (Brocken::band($flags, 2) == 0) { return 3; }
+if (Brocken::band($flags, 2) == 0) { exit 3; }
 # Suspect flag (bit 0) should be set
-if (Brocken::band($flags, 1) == 0) { return 4; }
-return 0;
+if (Brocken::band($flags, 1) == 0) { exit 4; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_push_suspect' . $brocken->ext;
@@ -95,8 +95,8 @@ Brocken::Runtime::push_suspect_buffer($addr, $hb);
 Brocken::Runtime::push_suspect_buffer($addr, $hb);
 # Count should still be 1 (not 2)
 my i64 $sc = Brocken::Runtime::suspect_count($hb);
-if ($sc != 1) { return 1; }
-return 0;
+if ($sc != 1) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_push_dedup' . $brocken->ext;
@@ -118,14 +118,14 @@ my ptr $addr = Brocken::ptr_add($obj, 0);
 Brocken::Runtime::push_suspect_buffer($addr, $hb);
 # Pop it
 my ptr $popped = Brocken::Runtime::pop_suspect_buffer($hb);
-if (Brocken::ptr_cmp_eq($popped, $addr) == 0) { return 1; }
+if (Brocken::ptr_cmp_eq($popped, $addr) == 0) { exit 1; }
 # Buffer should be empty
 my i64 $sc = Brocken::Runtime::suspect_count($hb);
-if ($sc != 0) { return 2; }
+if ($sc != 0) { exit 2; }
 # Buffered flag should be cleared
 my i64 $flags = Brocken::Runtime::get_gc_flags($addr);
-if (Brocken::band($flags, 2) != 0) { return 3; }
-return 0;
+if (Brocken::band($flags, 2) != 0) { exit 3; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_pop_suspect' . $brocken->ext;
@@ -143,8 +143,8 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $popped = Brocken::Runtime::pop_suspect_buffer($hb);
-if (Brocken::ptr_cmp_eq($popped, 0) == 0) { return 1; }
-return 0;
+if (Brocken::ptr_cmp_eq($popped, 0) == 0) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_pop_empty' . $brocken->ext;
@@ -172,14 +172,14 @@ Brocken::Runtime::push_suspect_buffer($pb, $hb);
 Brocken::Runtime::push_suspect_buffer($pc, $hb);
 # Pop should return in LIFO order: c, b, a
 my ptr $p1 = Brocken::Runtime::pop_suspect_buffer($hb);
-if (Brocken::ptr_cmp_eq($p1, $pc) == 0) { return 1; }
+if (Brocken::ptr_cmp_eq($p1, $pc) == 0) { exit 1; }
 my ptr $p2 = Brocken::Runtime::pop_suspect_buffer($hb);
-if (Brocken::ptr_cmp_eq($p2, $pb) == 0) { return 2; }
+if (Brocken::ptr_cmp_eq($p2, $pb) == 0) { exit 2; }
 my ptr $p3 = Brocken::Runtime::pop_suspect_buffer($hb);
-if (Brocken::ptr_cmp_eq($p3, $pa) == 0) { return 3; }
+if (Brocken::ptr_cmp_eq($p3, $pa) == 0) { exit 3; }
 # Buffer should be empty now
-if (Brocken::Runtime::suspect_count($hb) != 0) { return 4; }
-return 0;
+if (Brocken::Runtime::suspect_count($hb) != 0) { exit 4; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_lifo' . $brocken->ext;
@@ -199,8 +199,8 @@ my ptr $hb = Brocken::heap_base();
 Brocken::Runtime::gc_drain($hb);
 # Buffer should still be empty
 my i64 $sc = Brocken::Runtime::suspect_count($hb);
-if ($sc != 0) { return 1; }
-return 0;
+if ($sc != 0) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_drain_empty' . $brocken->ext;
@@ -220,11 +220,11 @@ my ptr $hb = Brocken::heap_base();
 my $a = 10;
 my ptr $pa = Brocken::ptr_add($a, 0);
 Brocken::Runtime::push_suspect_buffer($pa, $hb);
-if (Brocken::Runtime::suspect_count($hb) != 1) { return 1; }
+if (Brocken::Runtime::suspect_count($hb) != 1) { exit 1; }
 Brocken::Runtime::gc_drain($hb);
 # Buffer should be cleared
-if (Brocken::Runtime::suspect_count($hb) != 0) { return 2; }
-return 0;
+if (Brocken::Runtime::suspect_count($hb) != 0) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_drain_clears' . $brocken->ext;
@@ -247,9 +247,9 @@ my ptr $pa = Brocken::ptr_add($obj, 0);
 Brocken::Runtime::push_suspect_buffer($pa, $hb);
 Brocken::Runtime::gc_drain($hb);
 # Buffer should be cleared
-if (Brocken::Runtime::suspect_count($hb) != 0) { return 1; }
+if (Brocken::Runtime::suspect_count($hb) != 0) { exit 1; }
 # The var should still be valid (return its value)
-return $obj;
+exit $obj;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_drain_reachable' . $brocken->ext;
@@ -275,14 +275,14 @@ my ptr $pc = Brocken::ptr_add($c, 0);
 Brocken::Runtime::push_suspect_buffer($pa, $hb);
 Brocken::Runtime::push_suspect_buffer($pb, $hb);
 Brocken::Runtime::push_suspect_buffer($pc, $hb);
-if (Brocken::Runtime::suspect_count($hb) != 3) { return 1; }
+if (Brocken::Runtime::suspect_count($hb) != 3) { exit 1; }
 Brocken::Runtime::gc_drain($hb);
-if (Brocken::Runtime::suspect_count($hb) != 0) { return 2; }
+if (Brocken::Runtime::suspect_count($hb) != 0) { exit 2; }
 # Verify each var is still valid
-if ($a != 10) { return 3; }
-if ($b != 20) { return 4; }
-if ($c != 30) { return 5; }
-return 0;
+if ($a != 10) { exit 3; }
+if ($b != 20) { exit 4; }
+if ($c != 30) { exit 5; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_drain_multi' . $brocken->ext;
@@ -304,7 +304,7 @@ my $x = 42;
 my $y = $x;
 # When $y goes out of scope, decref fires with RC > 0 -> suspect push
 # Just verify no crash and the value survives
-return $y;
+exit $y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_decref_suspect' . $brocken->ext;
@@ -328,7 +328,7 @@ while (Brocken::ptr_cmp_gt($limit, $i)) {
     my i64 $y = Brocken::i64_add($x, $x);
     $i = Brocken::i64_add($i, 1);
 }
-return $i;
+exit $i;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r3_alloc_stress' . $brocken->ext;

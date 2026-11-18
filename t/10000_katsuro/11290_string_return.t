@@ -39,7 +39,7 @@ subtest 'a returned literal holds the right bytes' => sub {
     my $brocken = Brocken->new();
     plan skip_all => 'not a native host' unless $brocken->platform->is_native;
     my $src
-        = q{sub a() :returns(String) { return 'blah'; } sub b(String $n) :returns(String) { return 'Hi, ' . $n; } say(a(), a(), b('Alex')); return 0;};
+        = q{sub a() :returns(String) { return 'blah'; } sub b(String $n) :returns(String) { return 'Hi, ' . $n; } say(a(), a(), b('Alex')); exit 0;};
     my $module = $brocken->compile($src);
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     $brocken->linker->set_rodata( $module->rodata ) if $module->rodata && keys %{ $module->rodata };

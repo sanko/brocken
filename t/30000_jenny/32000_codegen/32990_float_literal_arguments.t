@@ -35,8 +35,8 @@ is(
     dies {
         my $module
             = Brocken->new->compile( 'sub g(f64 $a, f64 $b, f64 $c, f64 $d) :returns(i64) {' .
-                ' my f64 $s = $a + $b + $c + $d; my i64 $j = $s; return $j; }' .
-                ' return g(1.0, 2.0, 3.0, 4.0);' );
+                ' my f64 $s = $a + $b + $c + $d; my i64 $j = $s; exit $j; }' .
+                ' exit g(1.0, 2.0, 3.0, 4.0);' );
         $brocken->codegen->emit_functions( $module->functions );
     },
     undef,
@@ -52,7 +52,7 @@ is(
 sub entry_words ( $cg_class, $arch ) {
     my $plat   = Brocken::Katsuro::Platform::parse($arch);
     my $cg     = $cg_class->new( platform => $plat );
-    my $module = Brocken->new->compile( 'sub g(f32 $a) :returns(i64) { my f32 $s = $a; my i64 $j = $s; return $j; }' . ' return g(1.0);' );
+    my $module = Brocken->new->compile( 'sub g(f32 $a) :returns(i64) { my f32 $s = $a; my i64 $j = $s; return $j; }' . ' exit g(1.0);' );
     my @words;
     for my $func ( $module->functions->@* ) {
         next unless $func->name eq '_BROCKEN_ENTRY';
@@ -87,8 +87,8 @@ sub g( @{[ join ', ', @params ]} ) :returns(i64) {
     my i64 \$j = \$s;
     return \$j;
 }
-if (g( @{[ join ', ', @lit ]} ) == $total) { return 42; }
-return 1;
+if (g( @{[ join ', ', @lit ]} ) == $total) { exit 42; }
+exit 1;
 BROCKEN
             is( run( $src, "lit_${width}_$n" ), 42, "native: $n $width literal argument(s)" );
         }
@@ -102,8 +102,8 @@ sub g(f64 $a, f64 $b, f64 $c, f64 $d) :returns(i64) {
     my i64 $j = $s;
     return $j;
 }
-if (g(1, 2, 3, 4) == 10) { return 42; }
-return 1;
+if (g(1, 2, 3, 4) == 10) { exit 42; }
+exit 1;
 BROCKEN
     is( run( $src, 'lit_int' ), 42, 'native: integer literals to f64 parameters' );
 }

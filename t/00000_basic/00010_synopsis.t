@@ -13,7 +13,7 @@ sub fib( i64 $n ) :returns(i64) {
     return fib( $n - 1 ) + fib( $n - 2 );
 }
 
-return fib( 4 );
+exit fib( 4 );
 BROCKEN
 my $module = $brocken->compile($code);
 my $funcs  = $brocken->codegen->emit_functions( $module->functions );

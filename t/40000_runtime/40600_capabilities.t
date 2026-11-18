@@ -16,11 +16,11 @@ my ptr $hb = Brocken::heap_base();
 # CAP_FFI = 16, so bit 4 should be set.
 my i64 $caps = Brocken::load_i64(Brocken::ptr_add($hb, 104));
 my i64 $ffi_bit = Brocken::band($caps, 16);
-if ($ffi_bit == 0) { return 1; }
+if ($ffi_bit == 0) { exit 1; }
 # err_code should be 0 initially
 my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72));
-if ($err != 0) { return 2; }
-return 0;
+if ($err != 0) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_cap_default' . $brocken->ext;
@@ -48,8 +48,8 @@ my i64 $ret = Brocken::syscall(60, 42, 0, 0);
 # because fuel_exit_block returns from _BROCKEN_ENTRY. The ret value from syscall should be 0 (from the exit block), and
 # err_code should be 3.
 my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72));
-if ($err != 3) { return 1; }
-return 0;
+if ($err != 3) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_cap_zero' . $brocken->ext;
@@ -72,17 +72,17 @@ Brocken::store_i64(Brocken::ptr_add($hb, 72), 0);
 # Attempt syscall — should be blocked
 my i64 $ret1 = Brocken::syscall(60, 42, 0, 0);
 my i64 $err1 = Brocken::load_i64(Brocken::ptr_add($hb, 72));
-if ($err1 != 3) { return 1; }
+if ($err1 != 3) { exit 1; }
 # Now restore CAP_FFI (bit 4 = 16)
 Brocken::store_i64(Brocken::ptr_add($hb, 104), 16);
 # Reset err_code
 Brocken::store_i64(Brocken::ptr_add($hb, 72), 0);
 # Verify caps
 my i64 $caps = Brocken::load_i64(Brocken::ptr_add($hb, 104));
-if ($caps != 16) { return 2; }
+if ($caps != 16) { exit 2; }
 my i64 $ffi_bit = Brocken::band($caps, 16);
-if ($ffi_bit == 0) { return 3; }
-return 0;
+if ($ffi_bit == 0) { exit 3; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_cap_restore' . $brocken->ext;
@@ -105,8 +105,8 @@ Brocken::store_i64(Brocken::ptr_add($hb, 72), 0);
 # Attempt syscall — should be blocked (CAP_FFI bit not set)
 my i64 $ret = Brocken::syscall(60, 42, 0, 0);
 my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72));
-if ($err != 3) { return 1; }
-return 0;
+if ($err != 3) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_cap_wrong' . $brocken->ext;
@@ -130,27 +130,27 @@ my i64 $mem_lim = Brocken::load_i64(Brocken::ptr_add($hb, 88));
 my i64 $mem_use = Brocken::load_i64(Brocken::ptr_add($hb, 96));
 my i64 $caps    = Brocken::load_i64(Brocken::ptr_add($hb, 104));
 # fuel should be the default (1000000), not 0
-if ($fuel != 1000000) { return 1; }
+if ($fuel != 1000000) { exit 1; }
 # err_code should be 0
-if ($err != 0) { return 2; }
+if ($err != 0) { exit 2; }
 # memory_limit should be 0 (unlimited)
-if ($mem_lim != 0) { return 3; }
+if ($mem_lim != 0) { exit 3; }
 # memory_used should be 0
-if ($mem_use != 0) { return 4; }
+if ($mem_use != 0) { exit 4; }
 # capabilities should be ~0 (all bits set)
-if ($caps == 0) { return 5; }
+if ($caps == 0) { exit 5; }
 # Check a few specific cap bits
 my i64 $fs_read = Brocken::band($caps, 1);
 my i64 $fs_write = Brocken::band($caps, 2);
 my i64 $net      = Brocken::band($caps, 4);
 my i64 $system   = Brocken::band($caps, 8);
 my i64 $ffi      = Brocken::band($caps, 16);
-if ($fs_read == 0) { return 6; }
-if ($fs_write == 0) { return 7; }
-if ($net == 0) { return 8; }
-if ($system == 0) { return 9; }
-if ($ffi == 0) { return 10; }
-return 0;
+if ($fs_read == 0) { exit 6; }
+if ($fs_write == 0) { exit 7; }
+if ($net == 0) { exit 8; }
+if ($system == 0) { exit 9; }
+if ($ffi == 0) { exit 10; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_cap_clean' . $brocken->ext;

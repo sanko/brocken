@@ -34,24 +34,24 @@ my i64 $f63 = always_shl_63();
 my i64 $p63 = diag_shl_param(63);
 
 # If const path differs from param path, report which
-if (!Brocken::ptr_cmp_eq(Brocken::bxor($c63, $p63), 0)) { return 1; }
-if (!Brocken::ptr_cmp_eq(Brocken::bxor($f63, $p63), 0)) { return 1; }
+if (!Brocken::ptr_cmp_eq(Brocken::bxor($c63, $p63), 0)) { exit 1; }
+if (!Brocken::ptr_cmp_eq(Brocken::bxor($f63, $p63), 0)) { exit 1; }
 
 # If both paths give 0, something is fundamentally wrong
-if (Brocken::ptr_cmp_eq($c63, 0)) { return 2; }
+if (Brocken::ptr_cmp_eq($c63, 0)) { exit 2; }
 
 #### Phase 2: narrow down — is shl(1,31) also broken? ####
 my i64 $c31 = Brocken::shl(1, 31);
-if (Brocken::ptr_cmp_eq($c31, 0)) { return 31; }
+if (Brocken::ptr_cmp_eq($c31, 0)) { exit 31; }
 
 # shl(1,31) worked — so LSLV is not fundamentally broken for all shifts.
 # Check if shl(1,63) == 0 is specific to shift amount 63.
 my i64 $c62 = Brocken::shl(1, 62);
-if (Brocken::ptr_cmp_eq($c62, 0)) { return 32; }
+if (Brocken::ptr_cmp_eq($c62, 0)) { exit 32; }
 
 #### Phase 3: test shl(1,62) param vs const match ####
 my i64 $p62 = diag_shl_param(62);
-if (!Brocken::ptr_cmp_eq(Brocken::bxor($c62, $p62), 0)) { return 3; }
+if (!Brocken::ptr_cmp_eq(Brocken::bxor($c62, $p62), 0)) { exit 3; }
 
 #### Phase 4: full mark_line integration smoke test ####
 my ptr $hb = Brocken::heap_base();
@@ -60,9 +60,9 @@ Brocken::Runtime::mark_line($block, 0);
 Brocken::Runtime::mark_line($block, 1);
 Brocken::Runtime::mark_line($block, 63);
 my i64 $swept = Brocken::Runtime::sweep_block($block);
-if ($swept != 3) { return 4; }
+if ($swept != 3) { exit 4; }
 
-return 0;
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/shl_diag' . $brocken->ext;

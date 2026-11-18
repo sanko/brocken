@@ -13,9 +13,9 @@ use Test2::Tools::Brocken qw[answers executable_targets];
 # `render 'Test'` on a zero-parameter sub parses the same way and is then an ordinary arity error, which is the point:
 # the argument list is syntactic, not guessed from the signature.
 #
-# The behaviour cases use `exit(...)` so the entry point's value is an i64 with no string boxing, and run on the native
-# targets only (a top-level `return` would pull in the `write`-based warning the Wasm backend cannot link; see
-# `11260_implicit_return.t`).
+# The behaviour cases use `exit(...)` so the entry point's value is an i64 with no string boxing. They run on the native
+# targets only: a top-level `exit` now lowers to the entry's return on Wasm, but the `say`/`print` cases write strings
+# through a path the Wasm backend does not support here (see `11260_implicit_return.t`).
 my @native_targets = grep { $_->[0] ne 'wasm32-unknown-wasi' } executable_targets();
 sub native_case { answers( $_[0], $_[1], $_[2], targets => [@native_targets] ) }
 subtest 'a paren-less call runs like the parenthesised form' => sub {

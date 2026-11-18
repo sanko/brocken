@@ -7,7 +7,7 @@ no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'try without catch/finally is a parse error' => sub {
     my $c = Brocken->new;
-    like( dies { $c->compile('try { return 1; }') }, qr/catch.*finally/, 'try with neither catch nor finally croaks', );
+    like( dies { $c->compile('try { exit 1; }') }, qr/catch.*finally/, 'try with neither catch nor finally croaks', );
 };
 subtest 'try/catch with no throw - normal flow' => sub {
     my $brocken = Brocken->new();
@@ -22,7 +22,7 @@ try {
 } catch ($e) {
     $x = 0;
 }
-return $x;
+exit $x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_try_no_throw' . $brocken->ext;
@@ -47,7 +47,7 @@ try {
 } catch ($e) {
     $result = 3;
 }
-return $result;
+exit $result;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_throw_catch' . $brocken->ext;
@@ -70,7 +70,7 @@ try {
 } finally {
     $x = $x + 32;
 }
-return $x;
+exit $x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_try_finally' . $brocken->ext;
@@ -95,7 +95,7 @@ try {
 } finally {
     $x = $x + 32;
 }
-return $x;
+exit $x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_try_catch_finally' . $brocken->ext;
@@ -113,7 +113,7 @@ SKIP: {
         skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
         my $module = Brocken->new->compile(<<'BROCKEN');
 throw 42;
-return 0;
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_unhandled_throw' . $brocken->ext;

@@ -19,31 +19,31 @@ sub native_case { answers( $_[0], $_[1], $_[2], targets => [@native_targets] ) }
 # `probe` reports whether it saw list context.
 my $probe = 'sub probe() :returns(i64) { return want("list") ? 1 : 0; }';
 subtest 'a call in argument position sees list context' => sub {
-    native_case( "$probe sub g(i64 \$x) :returns(i64) { return \$x; } return g(probe());", 1, 'a single argument is list context' );
-    native_case( "$probe sub g2(i64 \$a, i64 \$b) :returns(i64) { return \$a + \$b; } return g2(probe(), probe());",
+    native_case( "$probe sub g(i64 \$x) :returns(i64) { return \$x; } exit g(probe());", 1, 'a single argument is list context' );
+    native_case( "$probe sub g2(i64 \$a, i64 \$b) :returns(i64) { return \$a + \$b; } exit g2(probe(), probe());",
         2, 'every argument in the list is list context' );
-    native_case( "$probe sub g(i64 \$x) :returns(i64) { return \$x; } sub f(i64 \$y) :returns(i64) { return \$y; } return f(g(probe()));",
+    native_case( "$probe sub g(i64 \$x) :returns(i64) { return \$x; } sub f(i64 \$y) :returns(i64) { return \$y; } exit f(g(probe()));",
         1, 'the override reaches through a nested call' );
-    native_case( "$probe sub g(i64 \$x) :returns(i64) { return \$x; } return g((probe()));", 1, 'parentheses around the argument are transparent' );
+    native_case( "$probe sub g(i64 \$x) :returns(i64) { return \$x; } exit g((probe()));", 1, 'parentheses around the argument are transparent' );
 };
 subtest 'a method call argument sees list context' => sub {
-    native_case( "class C { method take(i64 \$x) :returns(i64) { return \$x; } } $probe my \$c = C->new(); return \$c->take(probe());",
+    native_case( "class C { method take(i64 \$x) :returns(i64) { return \$x; } } $probe my \$c = C->new(); exit \$c->take(probe());",
         1, 'a plain call in a method argument is list context' );
     native_case(
-        'class C { method m() :returns(i64) { return want("list") ? 1 : 0; } } sub g(i64 $x) :returns(i64) { return $x; } my $c = C->new(); return g($c->m());',
+        'class C { method m() :returns(i64) { return want("list") ? 1 : 0; } } sub g(i64 $x) :returns(i64) { return $x; } my $c = C->new(); exit g($c->m());',
         1,
         'a method call in argument position is itself told want=list'
     );
 };
 subtest 'scalar context is unchanged' => sub {
-    native_case( "$probe my i64 \$x = probe(); return \$x;",          0, 'a declaration initialiser is scalar context' );
-    native_case( "$probe my i64 \$x = 0; \$x = probe(); return \$x;", 0, 'an assignment is scalar context' );
-    native_case( "$probe sub g(i64 \$x) :returns(i64) { return \$x; } return g(probe() * 5);",
+    native_case( "$probe my i64 \$x = probe(); exit \$x;",          0, 'a declaration initialiser is scalar context' );
+    native_case( "$probe my i64 \$x = 0; \$x = probe(); exit \$x;", 0, 'an assignment is scalar context' );
+    native_case( "$probe sub g(i64 \$x) :returns(i64) { return \$x; } exit g(probe() * 5);",
         0, 'an operator between the list and the call forces scalar context' );
 };
 subtest 'the override does not leak past the argument list' => sub {
     native_case(
-        "$probe sub g(i64 \$x) :returns(i64) { return \$x; } my i64 \$r = g(probe()); sub sc() :returns(i64) { return want(\"list\"); } return \$r * 10 + sc();",
+        "$probe sub g(i64 \$x) :returns(i64) { return \$x; } my i64 \$r = g(probe()); sub sc() :returns(i64) { return want(\"list\"); } exit \$r * 10 + sc();",
         10,
         'a later scalar-context call still sees scalar want'
     );

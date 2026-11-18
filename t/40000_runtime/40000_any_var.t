@@ -12,7 +12,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 42;
-return $x;
+exit $x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_any_init' . $brocken->ext;
@@ -30,7 +30,7 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 10;
 my $y = 32;
-return $x + $y;
+exit $x + $y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_any_arith' . $brocken->ext;
@@ -48,7 +48,7 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 10;
 $x = 42;
-return $x;
+exit $x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_any_reassign' . $brocken->ext;
@@ -66,7 +66,7 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my $a = 21;
 my $b = $a;
-return $a + $b;
+exit $a + $b;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_any_copy' . $brocken->ext;
@@ -84,7 +84,7 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 10;
 my i64 $y = 32;
-return $x + $y;
+exit $x + $y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_any_mixed' . $brocken->ext;
@@ -106,7 +106,7 @@ while ($i < 10) {
     $s = $s + $i;
     $i = $i + 1;
 }
-return $s;
+exit $s;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_any_loop' . $brocken->ext;
@@ -130,7 +130,7 @@ if ($x < $y) {
 } else {
     $r = 0;
 }
-return $r;
+exit $r;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_any_cond' . $brocken->ext;

@@ -42,24 +42,24 @@ SKIP: {
     skip 'Neither wasmtime nor node are installed', 1 unless wasm_runner();
     subtest 'signed division truncates toward zero' => sub {
         for my $ty (qw[i8 i16 i32 i64]) {
-            wasm_ans( "my $ty \$a = 20; my $ty \$b = 3; my $ty \$r = \$a / \$b; return \$r + 64;",                        70, "$ty 20 / 3 is 6" );
-            wasm_ans( "my $ty \$a = 0; my $ty \$b = 3; my $ty \$r = \$a - \$b; my $ty \$q = \$r / \$b; return \$q + 64;", 63, "$ty -3 / 3 is -1" );
+            wasm_ans( "my $ty \$a = 20; my $ty \$b = 3; my $ty \$r = \$a / \$b; exit \$r + 64;",                        70, "$ty 20 / 3 is 6" );
+            wasm_ans( "my $ty \$a = 0; my $ty \$b = 3; my $ty \$r = \$a - \$b; my $ty \$q = \$r / \$b; exit \$q + 64;", 63, "$ty -3 / 3 is -1" );
         }
     };
     subtest 'signed remainder keeps the sign of the dividend' => sub {
         for my $ty (qw[i8 i16 i32 i64]) {
-            wasm_ans( "my $ty \$a = 20; my $ty \$b = 3; my $ty \$r = \$a % \$b; return \$r + 64;",                        66, "$ty 20 % 3 is 2" );
-            wasm_ans( "my $ty \$a = 0; my $ty \$b = 7; my $ty \$r = \$a - \$b; my $ty \$m = \$r % \$b; return \$m + 64;", 64, "$ty -7 % 7 is 0" );
+            wasm_ans( "my $ty \$a = 20; my $ty \$b = 3; my $ty \$r = \$a % \$b; exit \$r + 64;",                        66, "$ty 20 % 3 is 2" );
+            wasm_ans( "my $ty \$a = 0; my $ty \$b = 7; my $ty \$r = \$a - \$b; my $ty \$m = \$r % \$b; exit \$m + 64;", 64, "$ty -7 % 7 is 0" );
         }
     };
     subtest 'a negative quotient rounds toward zero, not down' => sub {
-        wasm_ans( 'my i64 $a = 0; my i64 $b = 7; my i64 $r = $a - $b; my i64 $q = $r / $b; return ($q + 64) & 255;', 63, 'i64 -7 / 7 is -1, not -2' );
-        wasm_ans( 'my i32 $a = 0; my i32 $b = 7; my i32 $r = $a - $b; my i32 $q = $r / $b; return ($q + 64) & 255;', 63, 'i32 -7 / 7 is -1, not -2' );
+        wasm_ans( 'my i64 $a = 0; my i64 $b = 7; my i64 $r = $a - $b; my i64 $q = $r / $b; exit ($q + 64) & 255;', 63, 'i64 -7 / 7 is -1, not -2' );
+        wasm_ans( 'my i32 $a = 0; my i32 $b = 7; my i32 $r = $a - $b; my i32 $q = $r / $b; exit ($q + 64) & 255;', 63, 'i32 -7 / 7 is -1, not -2' );
     };
     subtest 'unsigned division still divides unsigned' => sub {
         for my $ty (qw[u8 u16 u32 u64]) {
-            wasm_ans( "my $ty \$a = 200; my $ty \$b = 100; my $ty \$r = \$a / \$b; return \$r;", 2, "$ty 200 / 100 is 2" );
-            wasm_ans( "my $ty \$a = 201; my $ty \$b = 100; my $ty \$r = \$a % \$b; return \$r;", 1, "$ty 201 % 100 is 1" );
+            wasm_ans( "my $ty \$a = 200; my $ty \$b = 100; my $ty \$r = \$a / \$b; exit \$r;", 2, "$ty 200 / 100 is 2" );
+            wasm_ans( "my $ty \$a = 201; my $ty \$b = 100; my $ty \$r = \$a % \$b; exit \$r;", 1, "$ty 201 % 100 is 1" );
         }
     };
     subtest 'a narrow signed value read back from memory keeps its sign' => sub {
@@ -67,31 +67,31 @@ SKIP: {
         # The load is what these all pass through, so the sign has to survive the round trip through the slot rather
         # than sitting in a register.
         for my $ty (qw[i8 i16]) {
-            wasm_ans( "my $ty \$a = 0; my $ty \$b = 3; my $ty \$c = \$a - \$b; my $ty \$d = \$c / \$b; return \$d + 64;", 63, "$ty -3 / 3 is -1" );
-            wasm_ans( "my $ty \$a = 0; my $ty \$b = 4; my $ty \$c = \$a - \$b; my $ty \$d = \$c >> 2; return (\$d + 64) & 255;",
+            wasm_ans( "my $ty \$a = 0; my $ty \$b = 3; my $ty \$c = \$a - \$b; my $ty \$d = \$c / \$b; exit \$d + 64;", 63, "$ty -3 / 3 is -1" );
+            wasm_ans( "my $ty \$a = 0; my $ty \$b = 4; my $ty \$c = \$a - \$b; my $ty \$d = \$c >> 2; exit (\$d + 64) & 255;",
                 63, "$ty -4 >> 2 is -1" );
-            wasm_ans( "my $ty \$a = 0; my $ty \$b = 4; my $ty \$c = \$a - \$b; my i64 \$d = \$c; return (\$d + 64) & 255;",
+            wasm_ans( "my $ty \$a = 0; my $ty \$b = 4; my $ty \$c = \$a - \$b; my i64 \$d = \$c; exit (\$d + 64) & 255;",
                 60, "$ty -4 widened to i64 is -4" );
         }
     };
     subtest 'the division opcodes have encodings' => sub {
         validates(
-            'my i32 $a = 20; my i32 $b = 3; my i32 $r = $a / $b; return $r;', 'i32 signed division validates',
+            'my i32 $a = 20; my i32 $b = 3; my i32 $r = $a / $b; exit $r;', 'i32 signed division validates',
             platform => $platform,
             basename => 'wasm_signed'
         );
         validates(
-            'my u32 $a = 20; my u32 $b = 3; my u32 $r = $a / $b; return $r;', 'i32 unsigned division validates',
+            'my u32 $a = 20; my u32 $b = 3; my u32 $r = $a / $b; exit $r;', 'i32 unsigned division validates',
             platform => $platform,
             basename => 'wasm_signed'
         );
         validates(
-            'my i64 $a = 20; my i64 $b = 3; my i64 $r = $a / $b; return $r;', 'i64 signed division validates',
+            'my i64 $a = 20; my i64 $b = 3; my i64 $r = $a / $b; exit $r;', 'i64 signed division validates',
             platform => $platform,
             basename => 'wasm_signed'
         );
         validates(
-            'my i8 $a = 20; my i8 $b = 3; my i8 $r = $a / $b; return $r;', 'i8 division validates',
+            'my i8 $a = 20; my i8 $b = 3; my i8 $r = $a / $b; exit $r;', 'i8 division validates',
             platform => $platform,
             basename => 'wasm_signed'
         );

@@ -249,10 +249,10 @@ class Brocken::Fuzz v0.0.1 {
         my $result_var = $var_names[ $self->_rand_int($#var_names) ];
         if ( $var_types->{$result_var}{signed} eq 'f' ) {
             push @stmts, "my i64 \$__r0 = \$$result_var;";
-            push @stmts, "return \$__r0;";
+            push @stmts, "exit \$__r0;";
         }
         else {
-            push @stmts, "return \$$result_var;";
+            push @stmts, "exit \$$result_var;";
         }
 
         # Compute whether we need 'brocken_native_types' for 128-bit types.

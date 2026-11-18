@@ -120,12 +120,14 @@ subtest 'While loop' => sub {
 };
 subtest 'Return statement' => sub {
     my $c    = Brocken->new;
-    my $prog = $c->parse('return 42; return;');
-    is( $prog->statements->@*, 2, 'two statements' );
-    isa_ok( $prog->statements->[0],       ['Brocken::Katsuro::AST::Stmt::Return'] );
-    isa_ok( $prog->statements->[0]->expr, ['Brocken::Katsuro::AST::Expr::Const'] );
-    is( $prog->statements->[0]->expr->value, 42 );
-    ok( !defined $prog->statements->[1]->expr, 'void return' );
+    my $prog = $c->parse('sub f() :returns(i64) { return 42; return; }');
+    is( $prog->statements->@*, 1, 'one declaration' );
+    my $body = $prog->statements->[0]->body->statements;
+    is( $body->@*, 2, 'two statements' );
+    isa_ok( $body->[0],       ['Brocken::Katsuro::AST::Stmt::Return'] );
+    isa_ok( $body->[0]->expr, ['Brocken::Katsuro::AST::Expr::Const'] );
+    is( $body->[0]->expr->value, 42 );
+    ok( !defined $body->[1]->expr, 'void return' );
 };
 subtest 'Subroutine declaration' => sub {
     my $c    = Brocken->new;
@@ -672,8 +674,8 @@ subtest 'Source positions on expressions and statements' => sub {
     my $c    = Brocken->new;
     my $prog = $c->parse( <<'BROCKEN', 'test.br' );
 my i64 $x = 42;
-return $x;
-if (1) { return 1; }
+exit $x;
+if (1) { exit 1; }
 sub foo(i64 $n) :returns(i64) { return $n; }
 class Point { field i64 $x; }
 BROCKEN
@@ -689,11 +691,11 @@ BROCKEN
     is( $init->line, 1,  'Const line' );
     is( $init->col,  13, 'Const col (42)' );
 
-    # 'return' keyword at col 1, line 2
+    # 'exit' keyword at col 1, line 2
     my $ret = $prog->statements->[1];
-    is( $ret->line,      2, 'Return line' );
-    is( $ret->col,       1, 'Return col' );
-    is( $ret->expr->col, 8, 'Var col ($x)' );
+    is( $ret->line,      2, 'Exit line' );
+    is( $ret->col,       1, 'Exit col' );
+    is( $ret->code->col, 6, 'Var col ($x)' );
 
     # 'if' keyword at col 1, line 3
     my $if = $prog->statements->[2];

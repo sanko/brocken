@@ -29,23 +29,23 @@ sub compiles_to ( $src, $want, $name ) {
     return;
 }
 subtest 'f32 slot round-trips through the register file' => sub {
-    compiles_to( 'my f32 $t = 1.5; my f32 $u = $t + $t; return 3.0 == $u ? 1 : 0;', 1, 'f32 add of a literal is 3.0' );
-    compiles_to( 'my f32 $t = 1.5; my f32 $u = 1.5; return $t == $u ? 1 : 0;',      1, 'two f32 locals holding 1.5 compare equal' );
+    compiles_to( 'my f32 $t = 1.5; my f32 $u = $t + $t; exit 3.0 == $u ? 1 : 0;', 1, 'f32 add of a literal is 3.0' );
+    compiles_to( 'my f32 $t = 1.5; my f32 $u = 1.5; exit $t == $u ? 1 : 0;',      1, 'two f32 locals holding 1.5 compare equal' );
 
     # 2^24 is exactly representable in f32, so this needs no rounding to be
     # correct; it fails outright if the store is a double-width write.
-    compiles_to( 'my f32 $t = 16777216.0; my f32 $u = 16777216.0; return $t == $u ? 1 : 0;', 1, 'f32 holds 2^24 exactly' );
+    compiles_to( 'my f32 $t = 16777216.0; my f32 $u = 16777216.0; exit $t == $u ? 1 : 0;', 1, 'f32 holds 2^24 exactly' );
 };
 subtest 'f32 keeps its width when returned' => sub {
-    compiles_to( 'my f32 $t = 2.5; return 2.5 == $t ? 1 : 0;', 1, 'f32 return compares equal' );
+    compiles_to( 'my f32 $t = 2.5; exit 2.5 == $t ? 1 : 0;', 1, 'f32 return compares equal' );
 };
 subtest 'a float of one width cannot be stored in a slot of the other' => sub {
 
     # There is no fptrunc or fpext in the IR, so this has to be refused
     # rather than silently reinterpreted: the value is loaded, so there is nothing to re-tag.
     for my $case (
-        [ 'my f64 $a = 1.5; my f32 $t = $a; return 0;', 'f64 loaded into an f32 slot' ],
-        [ 'my f32 $a = 1.5; my f64 $t = $a; return 0;', 'f32 loaded into an f64 slot' ],
+        [ 'my f64 $a = 1.5; my f32 $t = $a; exit 0;', 'f64 loaded into an f32 slot' ],
+        [ 'my f32 $a = 1.5; my f64 $t = $a; exit 0;', 'f32 loaded into an f64 slot' ],
     ) {
         my ( $src, $name ) = @$case;
         my $module = eval { Brocken->new->compile($src) };

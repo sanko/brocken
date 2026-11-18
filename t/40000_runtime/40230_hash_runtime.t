@@ -15,23 +15,23 @@ sub answers( $source, $want, $label ) {
     Test2::Tools::Brocken::answers( $source, $want, $label, targets => [@native_targets] );
 }
 subtest 'set then get round-trips a value' => sub {
-    answers( 'my %h; %h{"a"} = 42; return %h{"a"};', 42, 'one key reads back' );
+    answers( 'my %h; %h{"a"} = 42; exit %h{"a"};', 42, 'one key reads back' );
 };
 subtest 'a missing key reads as undef (0 unboxed)' => sub {
-    answers( 'my %h; %h{"a"} = 7; return %h{"absent"};', 0, 'missing key is undef -> 0' );
+    answers( 'my %h; %h{"a"} = 7; exit %h{"absent"};', 0, 'missing key is undef -> 0' );
 };
 subtest 'two keys keep independent values' => sub {
-    answers( 'my %h; %h{"a"} = 1; %h{"b"} = 2; return %h{"a"};', 1, 'first key unchanged' );
-    answers( 'my %h; %h{"a"} = 1; %h{"b"} = 2; return %h{"b"};', 2, 'second key stored separately' );
+    answers( 'my %h; %h{"a"} = 1; %h{"b"} = 2; exit %h{"a"};', 1, 'first key unchanged' );
+    answers( 'my %h; %h{"a"} = 1; %h{"b"} = 2; exit %h{"b"};', 2, 'second key stored separately' );
 };
 subtest 'a repeated key overwrites in place' => sub {
-    answers( 'my %h; %h{"x"} = 10; %h{"x"} = 30; return %h{"x"};',               30, 'last write wins' );
-    answers( 'my %h; %h{"x"} = 10; %h{"y"} = 20; %h{"x"} = 30; return %h{"y"};', 20, 'the other key is untouched' );
+    answers( 'my %h; %h{"x"} = 10; %h{"x"} = 30; exit %h{"x"};',               30, 'last write wins' );
+    answers( 'my %h; %h{"x"} = 10; %h{"y"} = 20; %h{"x"} = 30; exit %h{"y"};', 20, 'the other key is untouched' );
 };
 subtest 'growth past the initial capacity keeps every entry' => sub {
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; %h{"d"}=4; %h{"e"}=5; %h{"f"}=6; %h{"g"}=7; %h{"h"}=8; %h{"i"}=9; return %h{"a"};',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; %h{"d"}=4; %h{"e"}=5; %h{"f"}=6; %h{"g"}=7; %h{"h"}=8; %h{"i"}=9; exit %h{"a"};',
         1, 'the first key survives two rehashes' );
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; %h{"d"}=4; %h{"e"}=5; %h{"f"}=6; %h{"g"}=7; %h{"h"}=8; %h{"i"}=9; return %h{"i"};',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; %h{"d"}=4; %h{"e"}=5; %h{"f"}=6; %h{"g"}=7; %h{"h"}=8; %h{"i"}=9; exit %h{"i"};',
         9, 'the newest key survives' );
 };
 subtest 'many keys all remain addressable' => sub {
@@ -44,33 +44,33 @@ subtest 'many keys all remain addressable' => sub {
     # Each key holds its index; sum the first 64 natural numbers mod 256 to fold the whole table into one exit status.
     my $sum = 0;
     $sum = ( $sum + $_ ) % 256 for 0 .. $n - 1;
-    answers( $src . ' my i64 $t = 0;' . join( '', map {" \$t = \$t + %h{\"key$_\"};"} 0 .. $n - 1 ) . ' return $t;',
+    answers( $src . ' my i64 $t = 0;' . join( '', map {" \$t = \$t + %h{\"key$_\"};"} 0 .. $n - 1 ) . ' exit $t;',
         $sum, "all $n keys accumulate to $sum mod 256" );
 };
 subtest 'integer keys are stringified' => sub {
-    answers( 'my %h; %h{1} = 5; return %h{1};',            5, 'integer key round-trips' );
-    answers( 'my %h; %h{7} = 3; %h{8} = 4; return %h{7};', 3, 'two integer keys stay distinct' );
+    answers( 'my %h; %h{1} = 5; exit %h{1};',            5, 'integer key round-trips' );
+    answers( 'my %h; %h{7} = 3; %h{8} = 4; exit %h{7};', 3, 'two integer keys stay distinct' );
 };
 subtest 'values are read back as dynamic and usable in arithmetic' => sub {
-    answers( 'my %h; %h{"k"} = 5; return %h{"k"} + 37;', 42, 'a stored value adds' );
+    answers( 'my %h; %h{"k"} = 5; exit %h{"k"} + 37;', 42, 'a stored value adds' );
 };
 subtest 'reading a key whose value was overwritten releases the old box' => sub {
 
     # A 24-key table forces the table through several rehashes while every value is replaced once; a dangling or
     # double-freed box would show up as a wrong sum or a crash.
-    answers( 'my %h;' . join( '', map {qq{ %h{"k$_"} = $_;}} 0 .. 23 ) . join( '', map {qq{ %h{"k$_"} = $_ + 100;}} 0 .. 23 ) . ' return %h{"k23"};',
+    answers( 'my %h;' . join( '', map {qq{ %h{"k$_"} = $_;}} 0 .. 23 ) . join( '', map {qq{ %h{"k$_"} = $_ + 100;}} 0 .. 23 ) . ' exit %h{"k23"};',
         123, 'the last replaced value reads back' );
 };
 subtest 'exists reports membership, not truthiness' => sub {
-    answers( 'my %h; %h{"a"} = 1; if (exists %h{"a"}) { return 1; } return 0;', 1, 'a present key exists' );
-    answers( 'my %h; %h{"a"} = 1; if (exists %h{"b"}) { return 1; } return 0;', 0, 'an absent key does not exist' );
-    answers( 'my %h; %h{"a"} = 0; if (exists %h{"a"}) { return 1; } return 0;', 1, 'a key holding a false value still exists' );
-    answers( 'my %h; if (exists %h{"x"}) { return 1; } return 0;',              0, 'an empty hash has no keys' );
-    answers( 'my %h; %h{1} = 5; if (exists %h{1}) { return 1; } return 0;',     1, 'an integer key is found' );
+    answers( 'my %h; %h{"a"} = 1; if (exists %h{"a"}) { exit 1; } exit 0;', 1, 'a present key exists' );
+    answers( 'my %h; %h{"a"} = 1; if (exists %h{"b"}) { exit 1; } exit 0;', 0, 'an absent key does not exist' );
+    answers( 'my %h; %h{"a"} = 0; if (exists %h{"a"}) { exit 1; } exit 0;', 1, 'a key holding a false value still exists' );
+    answers( 'my %h; if (exists %h{"x"}) { exit 1; } exit 0;',              0, 'an empty hash has no keys' );
+    answers( 'my %h; %h{1} = 5; if (exists %h{1}) { exit 1; } exit 0;',     1, 'an integer key is found' );
 };
 subtest 'exists survives a rehash' => sub {
     my $src = 'my %h;' . join( '', map {qq{ %h{"k$_"} = $_;}} 0 .. 15 );
-    answers( $src . ' if (exists %h{"k0"}) { return 1; } return 0;',   1, 'the first key still exists after growing' );
-    answers( $src . ' if (exists %h{"nope"}) { return 1; } return 0;', 0, 'an absent key is still absent after growing' );
+    answers( $src . ' if (exists %h{"k0"}) { exit 1; } exit 0;',   1, 'the first key still exists after growing' );
+    answers( $src . ' if (exists %h{"nope"}) { exit 1; } exit 0;', 0, 'an absent key is still absent after growing' );
 };
 done_testing;

@@ -15,7 +15,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 99;
-return $x;
+exit $x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_inc_init' . $brocken->ext;
@@ -34,7 +34,7 @@ SKIP: {
 my $x = 42;
 my $y = 0;
 $y = $x;
-return $y;
+exit $y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_inc_decref' . $brocken->ext;
@@ -54,7 +54,7 @@ sub double(i64 $n) :returns(i64) {
     return $n * 2;
 }
 my $x = 21;
-return double($x);
+exit double($x);
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_inc_call' . $brocken->ext;
@@ -74,7 +74,7 @@ sub make_val(i64 $n) :returns(i64) {
     return $n;
 }
 my $x = make_val(42);
-return $x;
+exit $x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_inc_ret' . $brocken->ext;
@@ -99,7 +99,7 @@ sub wrap(i64 $n) :returns(i64) {
     return $inner;
 }
 my $x = wrap(77);
-return $x;
+exit $x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_inc_retbox' . $brocken->ext;
@@ -118,7 +118,7 @@ SKIP: {
 my $a = 10;
 my $b = 20;
 $a = $b;
-return $a;
+exit $a;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_inc_reassign' . $brocken->ext;
@@ -138,7 +138,7 @@ my $a = 1;
 my $b = 2;
 my $c = 3;
 my $d = 4;
-return $a + $b + $c + $d;
+exit $a + $b + $c + $d;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_inc_multi' . $brocken->ext;
@@ -162,7 +162,7 @@ sub chain(i64 $n) :returns(i64) {
     return make($tmp);
 }
 my $x = chain(21);
-return $x;
+exit $x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_inc_cross' . $brocken->ext;

@@ -60,7 +60,7 @@ Brocken::store_i64($slot, $r63);
 my i64 $readback = Brocken::load_i64($slot);
 if (!Brocken::ptr_cmp_eq($readback, $r63)) { $fail = 80; }
 
-return $fail;
+exit $fail;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/shl_diag2' . $brocken->ext;

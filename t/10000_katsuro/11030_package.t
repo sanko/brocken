@@ -84,17 +84,17 @@ BROCKEN
     is( $mod->package_versions->{'Math::Geometry'}, '1.0.0', 'version is recorded on the module' );
 };
 subtest 'sibling calls resolve within the package' => sub {
-    answers( 'package Foo; sub seven() :returns(i64) { return 7; } return seven();', 7, 'an unqualified call finds the packaged sub' );
-    answers( 'package Foo; sub a() :returns(i64) { return 4; } sub b() :returns(i64) { return a() + 1; } return b();',
+    answers( 'package Foo; sub seven() :returns(i64) { return 7; } exit seven();', 7, 'an unqualified call finds the packaged sub' );
+    answers( 'package Foo; sub a() :returns(i64) { return 4; } sub b() :returns(i64) { return a() + 1; } exit b();',
         5, 'a packaged sub calls its sibling unqualified' );
 };
 subtest 'block form scopes the prefix' => sub {
     answers(
-        'sub outside() :returns(i64) { return 9; } package Scope { sub outside() :returns(i64) { return 5; } } return outside() + Scope::outside();',
+        'sub outside() :returns(i64) { return 9; } package Scope { sub outside() :returns(i64) { return 5; } } exit outside() + Scope::outside();',
         14,
         'the block name and the top-level name coexist'
     );
-    answers( 'package P { sub inside() :returns(i64) { return 6; } } return P::inside();', 6, 'a packaged sub is reachable by its qualified name' );
+    answers( 'package P { sub inside() :returns(i64) { return 6; } } exit P::inside();', 6, 'a packaged sub is reachable by its qualified name' );
 };
 subtest 'classes and methods inside a package' => sub {
     answers( <<'BROCKEN', 22, 'constructor, reader, and method all resolve in-package' );
@@ -104,7 +104,7 @@ class Point {
     method double() :returns(i64) { return $x * 2; }
 }
 my ptr $p = Point->new(x => 11);
-return $p->double();
+exit $p->double();
 BROCKEN
     answers( <<'BROCKEN', 7, 'fields read back through a packaged class' );
 package Geo;
@@ -112,15 +112,15 @@ class Box {
     field i64 $v :param;
 }
 my ptr $b = Box->new(v => 7);
-return $b->v;
+exit $b->v;
 BROCKEN
 };
 subtest 'versioned package declarations run' => sub {
-    answers( 'package Math::Geometry 1.0.0; sub area() :returns(i64) { return 3; } return area();', 3, 'semicolon form with a version' );
-    answers( 'package V::W v2.0.0 { sub x() :returns(i64) { return 6; } } return V::W::x();',       6, 'block form with a version' );
+    answers( 'package Math::Geometry 1.0.0; sub area() :returns(i64) { return 3; } exit area();', 3, 'semicolon form with a version' );
+    answers( 'package V::W v2.0.0 { sub x() :returns(i64) { return 6; } } exit V::W::x();',       6, 'block form with a version' );
 };
 subtest 'an already-qualified sub name is not double-prefixed' => sub {
-    answers( 'package Brocken::Thing; sub Brocken::Thing::already() :returns(i64) { return 8; } return already();',
+    answers( 'package Brocken::Thing; sub Brocken::Thing::already() :returns(i64) { return 8; } exit already();',
         8, 'an absolute name stays absolute and is callable unqualified' );
 };
 done_testing;

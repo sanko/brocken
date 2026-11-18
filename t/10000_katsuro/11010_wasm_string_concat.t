@@ -16,7 +16,7 @@ subtest 'Dynamic concat lowers to a single str_concat runtime call, no libc' => 
     my $brocken  = Brocken->new( platform => $platform );
     my $module   = $brocken->compile(<<'BROCKEN');
 my String $s = 42 . " hello";
-return 0;
+exit 0;
 BROCKEN
     my %callees;
     for my $fn ( $module->functions->@* ) {
@@ -40,7 +40,7 @@ subtest 'Wasm module with dynamic concat links and validates' => sub {
     # module linked with calls to strlen/malloc/strcpy/strcat, and the Wasm linker died: "undefined function 'strlen'".
     my $module = $brocken->compile(<<'BROCKEN');
 my String $s = 5 . 10;
-return 0;
+exit 0;
 BROCKEN
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = temp_path('wasm_str_concat') . '.wasm';
@@ -70,7 +70,7 @@ say("hello " . 42);
 say("x" . "");
 say("" . "y");
 say(5 . 10);
-return 0;
+exit 0;
 BROCKEN
     my $rodata = $module->rodata;
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );

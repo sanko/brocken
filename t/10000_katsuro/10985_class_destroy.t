@@ -19,7 +19,7 @@ subtest 'DESTROY is callable and chains derived-to-root' => sub {
             ' DESTROY { $self->set_trace($self->trace() * 10 + 1); } }' .
             ' my ptr $d = Derived->new(trace => 0, seed => 7);' .
             ' $d->DESTROY();' .
-            ' return $d->trace();',
+            ' exit $d->trace();',
         12,
         'the derived body runs before the base body',
         targets => [@native]
@@ -34,7 +34,7 @@ subtest 'a three-level chain unwinds derived-to-root' => sub {
             ' class C :isa(B) { DESTROY { $self->set_t($self->t() * 3 + 3); } }' .
             ' my ptr $c = C->new(t => 0);' .
             ' $c->DESTROY();' .
-            ' return $c->t();',
+            ' exit $c->t();',
         34,
         'C runs, then B, then A',
         targets => [@native]
@@ -48,7 +48,7 @@ subtest 'a class without its own DESTROY inherits the ancestor body' => sub {
             ' class Plain :isa(Base) { field i64 $x :param; }' .
             ' my ptr $p = Plain->new(t => 1, x => 2);' .
             ' $p->DESTROY();' .
-            ' return $p->t();',
+            ' exit $p->t();',
         6,
         'the inherited DESTROY runs on the derived object',
         targets => [@native]
@@ -62,7 +62,7 @@ subtest 'DESTROY sees the declaring class fields bare' => sub {
             ' DESTROY { $hits = $hits + $n; } }' .
             ' my ptr $c = Counter->new(n => 9);' .
             ' $c->DESTROY();' .
-            ' return $c->hits();',
+            ' exit $c->hits();',
         9,
         'the bare field access resolves in the destructor',
         targets => [@native]
@@ -76,7 +76,7 @@ subtest 'DESTROY can call the class own methods and accessors' => sub {
             ' DESTROY { $self->set_v($self->bump()); } }' .
             ' my ptr $t = Thing->new(v => 40);' .
             ' $t->DESTROY();' .
-            ' return $t->v();',
+            ' exit $t->v();',
         41,
         'the destructor body resolved the class own method and writer',
         targets => [@native]
@@ -84,7 +84,7 @@ subtest 'DESTROY can call the class own methods and accessors' => sub {
 };
 subtest 'a DESTROY-only class body is a definition, not a forward declaration' => sub {
     answers(
-        'class Only;' . ' class Only { DESTROY { } }' . ' my ptr $o = Only->new();' . ' $o->DESTROY();' . ' return 42;',
+        'class Only;' . ' class Only { DESTROY { } }' . ' my ptr $o = Only->new();' . ' $o->DESTROY();' . ' exit 42;',
         42,
         'the DESTROY-only body still registers a callable destructor',
         targets => [@native]

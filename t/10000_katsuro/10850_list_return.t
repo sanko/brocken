@@ -16,7 +16,7 @@ sub make_list() :returns(ptr) {
     return (3, 4);
 }
 my ($a, $b) = make_list();
-return $a + $b;
+exit $a + $b;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/list_return' . $brocken->ext;
@@ -36,7 +36,7 @@ sub make_list() :returns(ptr) {
     return (10, 20, 30);
 }
 my ($x, $y, $z) = make_list();
-return $x + $y + $z;
+exit $x + $y + $z;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/list_return_3' . $brocken->ext;
@@ -56,7 +56,7 @@ sub make_one() :returns(ptr) {
     return (42);
 }
 my ($v) = make_one();
-return $v;
+exit $v;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/list_one' . $brocken->ext;
@@ -77,7 +77,7 @@ sub make_list() :returns(ptr) {
     return ($x * 2, $x + 3);
 }
 my ($a, $b) = make_list();
-return $a + $b;
+exit $a + $b;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/list_expr_elems' . $brocken->ext;
@@ -107,21 +107,21 @@ sub make_list() :returns(ptr) {
     return (1.5, 2.5);
 }
 my ($a, $b) = make_list();
-return $a + $b;
+exit $a + $b;
 BROCKEN
             [ <<'BROCKEN', 5, 'a list of an integer and a float' ],
 sub make_list() :returns(ptr) {
     return (3, 2.5);
 }
 my ($a, $b) = make_list();
-return $a + $b;
+exit $a + $b;
 BROCKEN
             [ <<'BROCKEN', 4, 'a float list unpacked into f64 targets' ],
 sub make_list() :returns(ptr) {
     return (1.5, 2.5);
 }
 my (f64 $a, f64 $b) = make_list();
-return $a + $b;
+exit $a + $b;
 BROCKEN
             [ <<'BROCKEN', 9, 'an untyped element survives the return of its maker' ],
 sub make_list() :returns(ptr) {
@@ -129,7 +129,7 @@ sub make_list() :returns(ptr) {
     return ($u, 2);
 }
 my ($a, $b) = make_list();
-return $a + $b;
+exit $a + $b;
 BROCKEN
         );
         my $i = 0;
@@ -155,7 +155,7 @@ sub make_list() :returns(ptr) {
     return (2.5);
 }
 my ($a) = make_list();
-return $a == 2.5 ? 1 : 0;
+exit $a == 2.5 ? 1 : 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/list_float_eq' . $brocken->ext;
@@ -168,7 +168,7 @@ sub make_list() :returns(ptr) {
     return (2.5);
 }
 my ($a) = make_list();
-return $a == 4611686018427387904 ? 1 : 0;
+exit $a == 4611686018427387904 ? 1 : 0;
 BROCKEN
         my $file2 = $brocken->tmpdir . '/list_float_bits' . $brocken->ext;
         $brocken->linker->write_executable( $file2, $brocken->codegen->emit_functions( $again->functions ), $host );

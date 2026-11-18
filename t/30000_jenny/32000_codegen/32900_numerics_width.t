@@ -320,14 +320,14 @@ subtest 'a narrow signed value survives a round trip on Wasm' => sub {
     # The comparison promotes each narrow value back to i64, which is where the broken lowering showed up, so every case
     # here exercises the whole trip rather than just the narrowing.
     my @cases = (
-        [ 'i8 7',      'my i32 $k = 7; my i8 $j = $k; return $j == 7 ? 1 : 0;' ],
-        [ 'i8 100',    'my i32 $k = 100; my i8 $j = $k; return $j == 100 ? 1 : 0;' ],
-        [ 'i8 -56',    'my i32 $k = 200; my i8 $j = $k; return $j == -56 ? 1 : 0;' ],
-        [ 'i8 -1',     'my i32 $k = 255; my i8 $j = $k; return $j == -1 ? 1 : 0;' ],
-        [ 'u8 44',     'my i32 $k = 300; my u8 $j = $k; return $j == 44 ? 1 : 0;' ],
-        [ 'i16 70000', 'my i32 $k = 70000; my i16 $j = $k; return $j == 4464 ? 1 : 0;' ],
-        [ 'i16 -1',    'my i32 $k = 65535; my i16 $j = $k; return $j == -1 ? 1 : 0;' ],
-        [ 'u16 4464',  'my i32 $k = 70000; my u16 $j = $k; return $j == 4464 ? 1 : 0;' ]
+        [ 'i8 7',      'my i32 $k = 7; my i8 $j = $k; exit $j == 7 ? 1 : 0;' ],
+        [ 'i8 100',    'my i32 $k = 100; my i8 $j = $k; exit $j == 100 ? 1 : 0;' ],
+        [ 'i8 -56',    'my i32 $k = 200; my i8 $j = $k; exit $j == -56 ? 1 : 0;' ],
+        [ 'i8 -1',     'my i32 $k = 255; my i8 $j = $k; exit $j == -1 ? 1 : 0;' ],
+        [ 'u8 44',     'my i32 $k = 300; my u8 $j = $k; exit $j == 44 ? 1 : 0;' ],
+        [ 'i16 70000', 'my i32 $k = 70000; my i16 $j = $k; exit $j == 4464 ? 1 : 0;' ],
+        [ 'i16 -1',    'my i32 $k = 65535; my i16 $j = $k; exit $j == -1 ? 1 : 0;' ],
+        [ 'u16 4464',  'my i32 $k = 70000; my u16 $j = $k; exit $j == 4464 ? 1 : 0;' ]
     );
     for my $c (@cases) {
         my ( $name, $src ) = @$c;

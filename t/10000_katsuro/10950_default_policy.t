@@ -6,7 +6,7 @@ subtest 'set_default_policy sets class defaults' => sub {
     Brocken->set_default_policy( fuel => 999, mem_limit => 5000, capabilities => 0x0F, );
     my $c   = Brocken->new();
     my $mod = $c->compile(<<'BROCKEN');
-return 0;
+exit 0;
 BROCKEN
     ok( $mod, 'compiled with custom policy' );
     Brocken->set_default_policy( fuel => 1000000, mem_limit => 0, capabilities => ~0, );
@@ -22,7 +22,7 @@ subtest 'per-instance override' => sub {
     Brocken->set_default_policy( fuel => 500 );
     my $c   = Brocken->new( fuel => 999 );
     my $mod = $c->compile(<<'BROCKEN');
-return 0;
+exit 0;
 BROCKEN
     ok( $mod, 'compiled with per-instance fuel override' );
     Brocken->set_default_policy( fuel => 1000000 );
@@ -31,7 +31,7 @@ subtest 'policy flows to IR constants' => sub {
     Brocken->set_default_policy( fuel => 777, mem_limit => 8888, capabilities => 0x55 );
     my $c   = Brocken->new();
     my $mod = $c->compile(<<'BROCKEN');
-return 0;
+exit 0;
 BROCKEN
     my $text = $mod->as_string();
     like( $text, qr/store\s+i64\s+777/,  'fuel constant in IR' );

@@ -36,7 +36,7 @@ class Node {
     field Any $link :accessor :weak;
 }
 my ptr $n = Node->new();
-return 0;
+exit 0;
 BROCKEN
     ok( !$@, 'compiled class program' ) or diag $@;
 
@@ -69,7 +69,7 @@ class Strong {
 }
 my ptr $l = Leaf->new();
 my ptr $s = Strong->new();
-return 0;
+exit 0;
 BROCKEN
     ok( !$@, 'compiled class program' ) or diag $@;
     my $entry = find_function( $mod, '_BROCKEN_ENTRY' )->as_string;
@@ -97,7 +97,7 @@ my ptr $h  = Holder->new();
     my $tmp = 88;
     $h->set_v($tmp);
 }
-return Brocken::Runtime::suspect_count($hb);
+exit Brocken::Runtime::suspect_count($hb);
 BROCKEN
     my $weak = run_brocken(<<'BROCKEN');
 class Holder {
@@ -109,7 +109,7 @@ my ptr $h  = Holder->new();
     my $tmp = 88;
     $h->set_v($tmp);
 }
-return Brocken::Runtime::suspect_count($hb);
+exit Brocken::Runtime::suspect_count($hb);
 BROCKEN
 SKIP: {
         skip 'Not native', 2 unless defined $strong && defined $weak;
@@ -126,7 +126,7 @@ my ptr $hb     = Brocken::heap_base();
 my ptr $holder = Holder->new();
 my $keep = 41;
 $holder->set_weak($keep);
-return $holder->weak;
+exit $holder->weak;
 BROCKEN
 SKIP: {
         skip 'Not native', 1 unless defined $code;

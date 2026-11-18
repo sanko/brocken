@@ -27,7 +27,7 @@ my i64 \$n = $N;
 my [i64; \$n] \@arr;
 \@arr[0] = 1;
 \@arr[$N - 1] = $N;
-return \@arr[0] + \@arr[$N - 1];
+exit \@arr[0] + \@arr[$N - 1];
 BROCKEN
 }
 sub src_dyn_large() { return <<'BROCKEN' }
@@ -35,7 +35,7 @@ my i64 $n = 1000;
 my [i64; $n] @arr;
 @arr[0] = 25;
 @arr[999] = 5000;
-return @arr[0] + @arr[999];
+exit @arr[0] + @arr[999];
 BROCKEN
 
 sub find_alloc_array_call($src) {
@@ -79,13 +79,13 @@ my [i64; 4] @arr;
 @arr[0] = 1;
 @arr[3] = 4;
 $x = @arr[0] + @arr[3];
-return $x;
+exit $x;
 BROCKEN
     my $src_big = <<'BROCKEN';
 my [i64; 600] @arr;
 @arr[0] = 1;
 @arr[599] = 2;
-return @arr[0] + @arr[599];
+exit @arr[0] + @arr[599];
 BROCKEN
     for my $target (@TARGETS) {
         my ( $triple, $class )       = @$target;
@@ -123,7 +123,7 @@ subtest 'an untyped size is unboxed to i64 before alloc_array' => sub {
 my $n = 6;
 my [i64; $n] @arr;
 @arr[0] = 5;
-return @arr[0];
+exit @arr[0];
 BROCKEN
     my ( undef, $alloc ) = find_alloc_array_call($src);
     ok $alloc, 'the alloc_array call is present';
@@ -148,7 +148,7 @@ subtest 'IR render survives a dynamic count' => sub {
 my i64 $n = 6;
 my [i64; $n] @arr;
 @arr[0] = 5;
-return @arr[0];
+exit @arr[0];
 BROCKEN
     my ( $module, $alloc ) = find_alloc_array_call($src);
     ok $alloc, 'the alloc_array call is present';

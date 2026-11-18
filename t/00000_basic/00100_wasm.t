@@ -11,9 +11,9 @@ use Test2::Tools::Brocken qw[run_exec temp_path];
 #
 my $brocken = Brocken->new( platform => Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi') );
 ok $brocken, 'constructor builds a wasm compiler' or diag $@;
-my $module = $brocken->compile('my i32 $n = 40; return $n + 2;');
+my $module = $brocken->compile('my i32 $n = 40; exit $n + 2;');
 ok $module, 'lowers a program for wasm' or diag $@;
-is scalar $module->functions->@*, scalar $brocken->compile('return 0;')->functions->@*, 'lowering works and reports functions';
+is scalar $module->functions->@*, scalar $brocken->compile('exit 0;')->functions->@*, 'lowering works and reports functions';
 my $funcs = $brocken->codegen->emit_functions( $module->functions );
 ok scalar $funcs->@*, 'emits at least one blob' or diag $@;
 my $out = $brocken->tmpdir . '/wasm_probe' . $brocken->ext;

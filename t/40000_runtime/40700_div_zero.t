@@ -15,7 +15,7 @@ use feature 'brocken_native_types';
 my i64 $x = 10;
 my i64 $y = 0;
 my i64 $r = $x / $y;
-return $r;
+exit $r;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_div_zero_s' . $brocken->ext;
@@ -42,7 +42,7 @@ sub do_div() :returns(i64) {
 my ptr $hb = Brocken::heap_base();
 my i64 $_r = do_div();
 my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72));
-return $err;
+exit $err;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_div_zero_err' . $brocken->ext;
@@ -63,7 +63,7 @@ use feature 'brocken_native_types';
 my u64 $x = 10;
 my u64 $y = 0;
 my u64 $r = $x / $y;
-return $r;
+exit $r;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_div_zero_u' . $brocken->ext;
@@ -84,7 +84,7 @@ use feature 'brocken_native_types';
 my i64 $x = 10;
 my i64 $y = 0;
 my i64 $r = $x % $y;
-return $r;
+exit $r;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_rem_zero_s' . $brocken->ext;
@@ -105,7 +105,7 @@ use feature 'brocken_native_types';
 my i64 $x = 42;
 my i64 $y = 7;
 my i64 $r = $x / $y;
-return $r;
+exit $r;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_div_norm' . $brocken->ext;
@@ -125,7 +125,7 @@ SKIP: {
 use feature 'brocken_native_types';
 my i64 $x = 10;
 my i64 $r = $x / 0;
-return $r;
+exit $r;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_div_const0' . $brocken->ext;

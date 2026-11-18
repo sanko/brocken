@@ -15,27 +15,27 @@ sub answers ( $source, $want, $label ) {
     Test2::Tools::Brocken::answers( $source, $want, $label, targets => [@native_targets] );
 }
 subtest 'unary minus on a boxed float keeps the fraction' => sub {
-    answers( 'my $x = 3.5; my $r = -$x; return $r == -3.5 ? 1 : 0;', 1, 'a float box negates to its exact negative' );
-    answers( 'my $x = 3.5; my $r = -$x; return $r > -3.6 ? 1 : 0;',  1, 'the negated value is past -3.6' );
-    answers( 'my $x = 3.5; my $r = -$x; return $r < -3.4 ? 1 : 0;',  1, 'the negated value is before -3.4 (not truncated to -3)' );
+    answers( 'my $x = 3.5; my $r = -$x; exit $r == -3.5 ? 1 : 0;', 1, 'a float box negates to its exact negative' );
+    answers( 'my $x = 3.5; my $r = -$x; exit $r > -3.6 ? 1 : 0;',  1, 'the negated value is past -3.6' );
+    answers( 'my $x = 3.5; my $r = -$x; exit $r < -3.4 ? 1 : 0;',  1, 'the negated value is before -3.4 (not truncated to -3)' );
 };
 subtest 'unary minus on a boxed int is still correct' => sub {
-    answers( 'my $x = 5; my $r = -$x; return $r == -5 ? 1 : 0;', 1, 'an int box negates to -5' );
-    answers( 'my $x = 0; my $r = -$x; return $r == 0 ? 1 : 0;',  1, 'negating zero stays zero' );
+    answers( 'my $x = 5; my $r = -$x; exit $r == -5 ? 1 : 0;', 1, 'an int box negates to -5' );
+    answers( 'my $x = 0; my $r = -$x; exit $r == 0 ? 1 : 0;',  1, 'negating zero stays zero' );
 };
 subtest 'double negation round-trips' => sub {
-    answers( 'my $x = 3.5; my $r = -(-$x); return $r == 3.5 ? 1 : 0;', 1, 'a float survives two negations' );
-    answers( 'my $x = 7; my $r = -(-$x); return $r == 7 ? 1 : 0;',     1, 'an int survives two negations' );
+    answers( 'my $x = 3.5; my $r = -(-$x); exit $r == 3.5 ? 1 : 0;', 1, 'a float survives two negations' );
+    answers( 'my $x = 7; my $r = -(-$x); exit $r == 7 ? 1 : 0;',     1, 'an int survives two negations' );
 };
 subtest 'the negated result is usable in comparisons and slots' => sub {
-    answers( 'my $x = 3.5; my $r = -$x; if ($r) { return 1; } return 0;',                      1, 'a negated float is truthy' );
-    answers( 'my $x = 3.5; my $r = -$x; my f64 $y = $r; return $y == -3.5 ? 1 : 0;',           1, 'it stores into a typed f64 slot' );
-    answers( 'my $x = 3.5; my $r = -$x; my i64 $n = $r; return $n == -3 ? 1 : 0;',             1, 'storing into an i64 truncates toward zero' );
-    answers( 'my $x = 3.5; my $r = -$x; my f64 $y = 0.0; $y = $r; return $y == -3.5 ? 1 : 0;', 1, 'it assigns into a typed f64 slot' );
+    answers( 'my $x = 3.5; my $r = -$x; if ($r) { exit 1; } exit 0;',                      1, 'a negated float is truthy' );
+    answers( 'my $x = 3.5; my $r = -$x; my f64 $y = $r; exit $y == -3.5 ? 1 : 0;',           1, 'it stores into a typed f64 slot' );
+    answers( 'my $x = 3.5; my $r = -$x; my i64 $n = $r; exit $n == -3 ? 1 : 0;',             1, 'storing into an i64 truncates toward zero' );
+    answers( 'my $x = 3.5; my $r = -$x; my f64 $y = 0.0; $y = $r; exit $y == -3.5 ? 1 : 0;', 1, 'it assigns into a typed f64 slot' );
 };
 subtest 'a literal float still folds to a negative constant' => sub {
-    answers( 'my f64 $y = -3.5; return $y == -3.5 ? 1 : 0;', 1, 'a negative float literal' );
-    answers( 'my $r = -3.5; return $r == -3.5 ? 1 : 0;',     1, 'a negative float literal into an untyped slot' );
+    answers( 'my f64 $y = -3.5; exit $y == -3.5 ? 1 : 0;', 1, 'a negative float literal' );
+    answers( 'my $r = -3.5; exit $r == -3.5 ? 1 : 0;',     1, 'a negative float literal into an untyped slot' );
 };
 #
 done_testing;

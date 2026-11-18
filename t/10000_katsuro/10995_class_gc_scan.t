@@ -40,7 +40,7 @@ class Plain {
 }
 my ptr $n = Node->new(tag => 1);
 my ptr $p = Plain->new(n => 2);
-return $p->n;
+exit $p->n;
 BROCKEN
     ok( !$@, 'compiled class program' ) or diag $@;
     for my $name (qw[Node::__scan Node::__restore Plain::__scan Plain::__restore]) {
@@ -70,7 +70,7 @@ class Plain {
 }
 my ptr $n = Node->new();
 my ptr $p = Plain->new(n => 2);
-return $p->n;
+exit $p->n;
 BROCKEN
     ok( !$@, 'compiled class program' ) or diag $@;
     my $entry = find_function( $mod, '_BROCKEN_ENTRY' )->as_string;
@@ -113,7 +113,7 @@ class Bag {
     field i64 $n :param;
 }
 my ptr $bag = Bag->new(n => 1);
-return $bag->n;
+exit $bag->n;
 BROCKEN
     ok( !$@, 'compiled class program' ) or diag $@;
     my $scan = find_function( $mod, 'Brocken::Runtime::gc_scan_obj' )->as_string;
@@ -132,7 +132,7 @@ my ptr $hb  = Brocken::heap_base();
 my ptr $bag = Bag->new(n => 55);
 Brocken::Runtime::push_suspect_buffer($bag, $hb);
 Brocken::Runtime::gc_drain($hb);
-return $bag->n;
+exit $bag->n;
 BROCKEN
 SKIP: {
         skip 'Not native', 1 unless defined $code;
@@ -150,7 +150,7 @@ my $keep = 77;
 $holder->set_val($keep);
 Brocken::Runtime::push_suspect_buffer($holder, $hb);
 Brocken::Runtime::gc_drain($hb);
-return $holder->val;
+exit $holder->val;
 BROCKEN
 SKIP: {
         skip 'Not native', 1 unless defined $code;

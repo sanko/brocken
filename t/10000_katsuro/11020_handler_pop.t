@@ -28,7 +28,7 @@ sub f() :returns(i64) {
     }
     return 2;
 }
-return f();
+exit f();
 BROCKEN
     my ($f) = grep { $_->name eq 'f' } $mod->functions->@*;
     ok( $f, 'found function f' );
@@ -61,7 +61,7 @@ sub g() :returns(i64) {
     }
     return 0;
 }
-return g();
+exit g();
 BROCKEN
 };
 subtest 'last out of a try inside a loop pops the handler' => sub {
@@ -83,7 +83,7 @@ sub g() :returns(i64) {
     }
     return 0;
 }
-return g();
+exit g();
 BROCKEN
 };
 done_testing;

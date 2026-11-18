@@ -53,17 +53,17 @@ BROCKEN
         $run_case->(
             'deep',
             $driver->(
-                'my i64 $r = f(100000); my ptr $hb = Brocken::heap_base(); my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72)); return $err;'),
+                'my i64 $r = f(100000); my ptr $hb = Brocken::heap_base(); my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72)); exit $err;'),
             6
         );
 
         # A shallow recursion stays under the line and returns normally.  f(n) = n+1,
         # so f(3000) = 3001, which the OS truncates to a one-byte exit status (185).
-        $run_case->( 'shallow', $driver->('my i64 $r = f(3000); return $r;'), 185 );
+        $run_case->( 'shallow', $driver->('my i64 $r = f(3000); exit $r;'), 185 );
 
         # The guard must not disturb programs that ignore err_code: deep recursion
         # hits the guard, every over-limit frame returns 0, and main exits cleanly.
-        $run_case->( 'deep_clean', $driver->('my i64 $r = f(100000); return 0;'), 0 );
+        $run_case->( 'deep_clean', $driver->('my i64 $r = f(100000); exit 0;'), 0 );
 
         # With a live try/catch handler the guard longjmps to it exactly like throw.
         $run_case->(
@@ -79,7 +79,7 @@ sub main() :returns(i64) {
     }
     return $caught;
 }
-return main();
+exit main();
 BROCKEN
             , 42
         );
@@ -99,7 +99,7 @@ sub main() :returns(i64) {
     }
     return $caught;
 }
-return main();
+exit main();
 BROCKEN
             , 3
         );

@@ -12,7 +12,7 @@ subtest 'Parser accepts eq/ne/lt/gt/le/ge/cmp as binary operators' => sub {
 my String \$a = "x";
 my String \$b = "y";
 my \$r = \$a $op \$b;
-return 0;
+exit 0;
 BROCKEN
         my $assign = $ast->statements->[2];
         ok( defined $assign,                                      "$op: third statement exists" );
@@ -27,7 +27,7 @@ subtest 'Parser accepts length() as function call' => sub {
     my $ast = Brocken->new->parse(<<'BROCKEN');
 my String $s = "hello";
 my $len = length($s);
-return 0;
+exit 0;
 BROCKEN
     my $assign = $ast->statements->[1];
     ok( defined $assign,                                      'second statement exists' );
@@ -43,7 +43,7 @@ subtest 'String eq produces strcmp + icmp eq in IR' => sub {
 my String $a = "hello";
 my String $b = "hello";
 my $r = $a eq $b;
-return $r;
+exit $r;
 BROCKEN
     my $funcs = $module->functions;
     ok( scalar $funcs->@* > 0, 'at least one function' );
@@ -78,7 +78,7 @@ if ($a eq $c) {
 } else {
     say("nomatch");
 }
-return 0;
+exit 0;
 BROCKEN
         my $rodata = $module->rodata;
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -104,7 +104,7 @@ if ($a ne $b) {
 } else {
     say("same");
 }
-return 0;
+exit 0;
 BROCKEN
         my $rodata = $module->rodata;
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -129,7 +129,7 @@ if ($a lt $b) { say("lt-yes"); } else { say("lt-no"); }
 if ($a gt $b) { say("gt-yes"); } else { say("gt-no"); }
 if ($a le $a) { say("le-yes"); } else { say("le-no"); }
 if ($a ge $a) { say("ge-yes"); } else { say("ge-no"); }
-return 0;
+exit 0;
 BROCKEN
         my $rodata = $module->rodata;
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -154,7 +154,7 @@ my i64 $r1 = $a cmp $b;
 say("" . $r1);
 my i64 $r2 = $a cmp $a;
 say("" . $r2);
-return 0;
+exit 0;
 BROCKEN
         my $rodata = $module->rodata;
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -171,21 +171,25 @@ subtest 'length() returns string length in IR' => sub {
     my $module = Brocken->new->compile(<<'BROCKEN');
 my String $s = "hello";
 my $len = length($s);
-return $len;
+exit $len;
 BROCKEN
     my $funcs = $module->functions;
     ok( scalar $funcs->@* > 0, 'at least one function' );
-    my $found_strlen = 0;
+
+    # `length` lowers to the runtime's `str_len` helper. Check the call in the entry, where the top-level `length` was
+    # lowered -- a whole-module scan would also match the runtime helper's own internal `str_len` calls.
+    my $found_str_len = 0;
     for my $fn ( $funcs->@* ) {
+        next unless $fn->name eq '_BROCKEN_ENTRY';
         for my $block ( $fn->blocks->@* ) {
             for my $inst ( $block->instructions->@* ) {
                 if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') && $inst->callee ) {
-                    $found_strlen = 1 if $inst->callee->name eq 'strlen' || $inst->callee->name eq '_strlen';
+                    $found_str_len = 1 if $inst->callee->name eq 'Brocken::Runtime::str_len';
                 }
             }
         }
     }
-    ok( $found_strlen, 'strlen call found in IR' );
+    ok( $found_str_len, 'str_len call found in IR' );
 };
 subtest 'length() through native execution' => sub {
     my $brocken = Brocken->new();
@@ -196,7 +200,7 @@ SKIP: {
 my String $s = "hello";
 my i64 $len = length($s);
 say("" . $len);
-return 0;
+exit 0;
 BROCKEN
         my $rodata = $module->rodata;
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -219,7 +223,7 @@ my String $a = "";
 my String $b = "";
 if ($a eq $b) { say("empty-eq"); } else { say("empty-ne"); }
 if ($a eq "x") { say("empty-ne2"); } else { say("empty-ne3"); }
-return 0;
+exit 0;
 BROCKEN
         my $rodata = $module->rodata;
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );

@@ -22,55 +22,55 @@ subtest 'signed division regressions' => sub {
     test_prog( 'neg / neg => pos', <<'PROG', 8 );
 my i64 $v = -8;
 $v = $v / -1;
-return $v;
+exit $v;
 PROG
     test_prog( 'pos / neg => neg', <<'PROG', -21 );
 my i64 $v = 42;
 $v = $v / -2;
-return $v;
+exit $v;
 PROG
     test_prog( 'neg / pos => neg', <<'PROG', -21 );
 my i64 $v = -42;
 $v = $v / 2;
-return $v;
+exit $v;
 PROG
     test_prog( 'neg / neg => pos (large)', <<'PROG', 4 );
 my i64 $v = -100;
 $v = $v / -25;
-return $v;
+exit $v;
 PROG
     test_prog( 'zero / neg => zero', <<'PROG', 0 );
 my i64 $v = 0;
 $v = $v / -42;
-return $v;
+exit $v;
 PROG
 };
 subtest 'signed remainder regressions' => sub {
     test_prog( 'neg % neg => zero', <<'PROG', 0 );
 my i64 $v = -84;
 $v = $v % -84;
-return $v;
+exit $v;
 PROG
     test_prog( 'pos % pos => pos remainder', <<'PROG', 2 );
 my i64 $v1 = 100;
 my i64 $v2 = 7;
 $v1 = $v1 % $v2;
-return $v1;
+exit $v1;
 PROG
     test_prog( 'neg % pos => neg remainder', <<'PROG', -2 );
 my i64 $v = -42;
 $v = $v % 5;
-return $v;
+exit $v;
 PROG
     test_prog( 'pos % neg => pos remainder', <<'PROG', 2 );
 my i64 $v = 42;
 $v = $v % -5;
-return $v;
+exit $v;
 PROG
     test_prog( 'neg % neg => neg remainder', <<'PROG', -2 );
 my i64 $v = -42;
 $v = $v % -5;
-return $v;
+exit $v;
 PROG
 };
 
@@ -99,7 +99,7 @@ $v3 = $v1 * $v2;
 $v2 = $v2 / $v1;
 $v3 = $v1 - $v2;
 $v1 = $v2 - $v1;
-return $v1;
+exit $v1;
 PROG
 };
 
@@ -111,23 +111,23 @@ subtest 'bitwise ops with negatives (fuzzer expected-value fix)' => sub {
     test_prog( '-78 & -78 = -78', <<'PROG', -78 );
 my i64 $v = -78;
 $v = $v & $v;
-return $v;
+exit $v;
 PROG
     test_prog( '-78 | -78 = -78', <<'PROG', -78 );
 my i64 $v = -78;
 $v = $v | $v;
-return $v;
+exit $v;
 PROG
     test_prog( '-78 ^ -78 = 0', <<'PROG', 0 );
 my i64 $v = -78;
 $v = $v ^ $v;
-return $v;
+exit $v;
 PROG
     test_prog( '-78 & 1 = 0', <<'PROG', 0 );
 my i64 $v1 = -78;
 my i64 $v2 = 1;
 $v1 = $v1 & $v2;
-return $v1;
+exit $v1;
 PROG
 };
 
@@ -143,7 +143,7 @@ subtest 'register clobber (rax/rdx) regressions' => sub {
 my i64 $v1 = 40;
 my i64 $v2 = 3;
 $v1 = $v1 % $v2;
-return $v2;
+exit $v2;
 PROG
 
     # Many live values across a division to exhaust registers, forcing
@@ -163,7 +163,7 @@ my i64 $k = 11;
 my i64 $l = 12;
 my i64 $m = 13;
 $j = $j / $k;
-return $c + $d + $e + $f + $g + $h + $i + $j + $k + $l + $m;
+exit $c + $d + $e + $f + $g + $h + $i + $j + $k + $l + $m;
 PROG
 
     # Division/modulo chain from fuzzer seed 42 where the return value is
@@ -174,7 +174,7 @@ my i64 $v2 = -68;
 my i64 $v3 = -64;
 my i64 $v4 = 60;
 $v3 = $v2 % $v3;
-return $v4;
+exit $v4;
 PROG
 };
 
@@ -202,7 +202,7 @@ my i64 $l = 12;
 my i64 $m = 13;
 my i64 $n = 14;
 $j = $j << $i;
-return $h;
+exit $h;
 PROG
 
     # Shift right with variable count, from fuzzer seed 1943945120.
@@ -236,7 +236,7 @@ $v3 = $v2 & $v5;
 $v6 = $v6 | $v1;
 $v1 = $v6 - $v1;
 $v6 = -$v2;
-return $v5;
+exit $v5;
 PROG
 
     # Shifts with multiple live ranges - return value is never shifted.
@@ -254,7 +254,7 @@ $b = $a << $b;
 $c = $c >> $d;
 $e = $f << $a;
 $h = $g >> $a;
-return $i;
+exit $i;
 PROG
 };
 
@@ -289,7 +289,7 @@ $v1 = $v2 | $v1;
 $v2 = $v2 / $v2;
 $v2 = $v1 | $v2;
 $v2 = $v2 | $v2;
-return $v2;
+exit $v2;
 PROG
 };
 
@@ -302,19 +302,19 @@ subtest 'i128 negation (arm64/riscv64 fix)' => sub {
 use feature 'brocken_native_types';
 my i128 $v = -50;
 $v = -$v;
-return $v;
+exit $v;
 PROG
     test_prog( 'neg -1 => 1', <<'PROG', 1 );
 use feature 'brocken_native_types';
 my i128 $v = -1;
 $v = -$v;
-return $v;
+exit $v;
 PROG
     test_prog( 'neg 42 => -42 masked', <<'PROG', 214 );
 use feature 'brocken_native_types';
 my i128 $v = 42;
 $v = -$v;
-return $v;
+exit $v;
 PROG
 };
 
@@ -327,7 +327,7 @@ use feature 'brocken_native_types';
 my u128 $v1 = 77;
 my u32 $v2 = 89;
 $v2 = $v1 & $v2;
-return $v2;
+exit $v2;
 PROG
 };
 
@@ -341,7 +341,7 @@ my i128 $v1 = 90;
 my f64 $v2 = 87.0;
 $v1 = $v2 / $v1;
 my i64 $r = $v1;
-return $r;
+exit $r;
 PROG
 };
 
@@ -356,35 +356,35 @@ use feature 'brocken_native_types';
 my u128 $v1 = 77;
 my u32 $v2 = 89;
 $v2 = $v2 - $v1;
-return $v2;
+exit $v2;
 PROG
     test_prog( 'u32 + u128', <<'PROG', 166 );
 use feature 'brocken_native_types';
 my u128 $v1 = 77;
 my u32 $v2 = 89;
 $v2 = $v2 + $v1;
-return $v2;
+exit $v2;
 PROG
     test_prog( 'u32 & u128', <<'PROG', 73 );
 use feature 'brocken_native_types';
 my u128 $v1 = 77;
 my u32 $v2 = 89;
 $v2 = $v2 & $v1;
-return $v2;
+exit $v2;
 PROG
     test_prog( 'u32 | u128', <<'PROG', 93 );
 use feature 'brocken_native_types';
 my u128 $v1 = 77;
 my u32 $v2 = 89;
 $v2 = $v2 | $v1;
-return $v2;
+exit $v2;
 PROG
     test_prog( 'u32 ^ u128', <<'PROG', 20 );
 use feature 'brocken_native_types';
 my u128 $v1 = 77;
 my u32 $v2 = 89;
 $v2 = $v2 ^ $v1;
-return $v2;
+exit $v2;
 PROG
 };
 
@@ -413,7 +413,7 @@ subtest 'unsigned LHS vs wider signed RHS (div/rem/cmp)' => sub {
 my u8 $v1 = 50;
 my i64 $v2 = -5;
 $v2 = $v1 % $v2;
-return $v2;
+exit $v2;
 PROG
 
     # u8 / i64: 50 / (-5) = -10, exit code -10 & 0xFF = 246.
@@ -421,14 +421,14 @@ PROG
 my u8 $v1 = 50;
 my i64 $v2 = -5;
 $v2 = $v1 / $v2;
-return $v2;
+exit $v2;
 PROG
 
     # u8 <= i64(-5): signed comparison, 50 <= -5 is FALSE.
     test_prog( 'u8 <= i64 (50 <= -5=F)', <<'PROG', 3 );
 my u8 $v1 = 50;
 my i64 $v2 = -5;
-if ($v1 <= $v2) { return 2; } else { return 3; }
+if ($v1 <= $v2) { exit 2; } else { exit 3; }
 PROG
 
     # u64 % i8(-5): LHS wider, compiler promotes i8 to u64 (unsigned).
@@ -437,7 +437,7 @@ PROG
 my u64 $v1 = 50;
 my i8 $v2 = -5;
 $v2 = $v1 % $v2;
-return $v2;
+exit $v2;
 PROG
 
     # u16 % i64(-3): 50000 % (-3) signed = 50000 - (-16556)*(-3) = 2.
@@ -445,7 +445,7 @@ PROG
 my u16 $v1 = 50000;
 my i64 $v2 = -3;
 $v2 = $v1 % $v2;
-return $v2;
+exit $v2;
 PROG
 };
 
@@ -480,14 +480,14 @@ my f64 $v1 = 0.0;
 my u64 $v2 = 13;
 $v1 = $v2 | $v2;
 my i64 $r = $v1;
-return $r;
+exit $r;
 PROG
     test_prog( 'int neg stored to f64, read back as int', <<'PROG', 123 );
 my i64 $v1 = -123;
 my f64 $v2 = 0.0;
 $v2 = -$v1;
 my i64 $r = $v2;
-return $r;
+exit $r;
 PROG
     test_prog( 'cmp result stored to f64, read back as int', <<'PROG', 1 );
 my i64 $v1 = 10;
@@ -495,7 +495,7 @@ my i64 $v2 = 20;
 my f64 $v3 = 0.0;
 $v3 = $v1 < $v2;
 my i64 $r = $v3;
-return $r;
+exit $r;
 PROG
 };
 
@@ -522,7 +522,7 @@ if ($v1 != $v1 || $v1 < $v2) {
 }
 $v3 = -$v2;
 $v1 = $v2 % $v2;
-return $v1;
+exit $v1;
 PROG
 };
 
@@ -554,7 +554,7 @@ if ($v2 >= $v3) {
 $v1 = $v1 ^ $v3;
 $v2 = $v2 & $v1;
 $v4 = $v1 - $v1;
-return $v1;
+exit $v1;
 PROG
 };
 
@@ -579,7 +579,7 @@ $v3 = $v3 / $v3;
 $v2 = -$v5;
 $v5 = adder(-80, $v1, $v1);
 $v5 = $v3;
-return $v1;
+exit $v1;
 PROG
     test_prog( 'i128 sub return with i32 return_var', <<'PROG', 61 );
 use feature 'brocken_native_types';
@@ -612,7 +612,7 @@ $v3 = $v3 / $v3;
 $v2 = -$v5;
 $v5 = adder(-80, $v1, $v1);
 $v5 = $v3;
-return $v1;
+exit $v1;
 PROG
 };
 
@@ -628,7 +628,7 @@ subtest '|| and && are bitwise (not logical) in Brocken' => sub {
 my bool $b = false;
 $b = $b || -26;
 my i64 $r = $b;
-return $r;
+exit $r;
 PROG
 
     # || on ints returns bitwise OR value
@@ -636,7 +636,7 @@ PROG
 my i64 $a = 0;
 my i64 $b = -26;
 $a = $a || $b;
-return $a;
+exit $a;
 PROG
 
     # Case 8 pattern: -34 && -34 → bitwise AND = -34 → f64 sitofp → i16 fptosi
@@ -645,7 +645,7 @@ my f64 $f = 63.0;
 my i64 $n = -34;
 $f = $n && $n;
 my i16 $z = $f;
-return $z;
+exit $z;
 PROG
 
     # Case 15 pattern: -82 && 8 → bitwise AND = 8
@@ -653,7 +653,7 @@ PROG
 my i64 $a = -82;
 my i32 $b = 8;
 $b = $a && $b;
-return $b;
+exit $b;
 PROG
 
     # && on unsigned values preserves bitwise semantics
@@ -661,7 +661,7 @@ PROG
 my i64 $a = 42;
 my i64 $b = 7;
 $a = $a && $b;
-return $a;
+exit $a;
 PROG
 
     # || on negative values preserves sign
@@ -669,7 +669,7 @@ PROG
 my i64 $a = -1;
 my i64 $b = -2;
 $a = $a || $b;
-return $a;
+exit $a;
 PROG
 };
 
@@ -683,7 +683,7 @@ my i64 $v1 = 999;
 while ($v1 > 0) {
     next;
 }
-return 42;
+exit 42;
 PROG
     test_prog( 'infinite while (no next) exits via guard', <<'PROG', 7 );
 my i64 $a = 1;
@@ -691,7 +691,7 @@ my i64 $b = 0;
 while ($a > $b) {
     $a = $a;  # no progress toward exit
 }
-return 7;
+exit 7;
 PROG
 };
 
@@ -702,7 +702,7 @@ use feature 'brocken_native_types';
 sub helper(u128 $x) :returns(u64) {
     return $x;
 }
-return helper(0xDEADBEEF);
+exit helper(0xDEADBEEF);
 PROG
 };
 
@@ -718,50 +718,50 @@ subtest 'mixed-signedness comparison regressions (seed 100 case 4)' => sub {
 my u8 $a = 227;
 my i8 $b = -73;
 if ($a > $b) {
-    return 1;
+    exit 1;
 }
-return 0;
+exit 0;
 PROG
     test_prog( 'i8(-73) < u8(227) should be true', <<'PROG', 1 );
 my i8 $a = -73;
 my u8 $b = 227;
 if ($a < $b) {
-    return 1;
+    exit 1;
 }
-return 0;
+exit 0;
 PROG
     test_prog( 'u8(0) == i8(0) should be true', <<'PROG', 1 );
 my u8 $a = 0;
 my i8 $b = 0;
 if ($a == $b) {
-    return 1;
+    exit 1;
 }
-return 0;
+exit 0;
 PROG
     test_prog( 'i8(-1) < u8(0) should be true (signed comparison)', <<'PROG', 1 );
 my i8 $a = -1;
 my u8 $b = 0;
 if ($a < $b) {
-    return 1;
+    exit 1;
 }
-return 0;
+exit 0;
 PROG
     test_prog( 'u16(65535) > i16(1) should be true', <<'PROG', 1 );
 my u16 $a = 65535;
 my i16 $b = 1;
 if ($a > $b) {
-    return 1;
+    exit 1;
 }
-return 0;
+exit 0;
 PROG
     test_prog( 'u32(4294967295) >= i32(1) should be true', <<'PROG', 1 );
 use feature 'brocken_native_types';
 my u32 $a = 4294967295;
 my i32 $b = 1;
 if ($a >= $b) {
-    return 1;
+    exit 1;
 }
-return 0;
+exit 0;
 PROG
     test_prog( 'full fuzz case 4 (seed 100)', <<'PROG', 1 );
 use feature 'brocken_native_types';
@@ -808,7 +808,7 @@ while ($v6 != $v2) {
 }
 $v2 = $v3 ^ $v5;
 $v5 = -$v5;
-return $v3;
+exit $v3;
 PROG
 };
 
@@ -821,31 +821,31 @@ subtest 'bool negation regressions (seed 100 case 7)' => sub {
     test_prog( 'negate true bool then use as i64', <<'PROG', 255 );
 my bool $b = true;
 my i64 $v = -$b;
-return $v;
+exit $v;
 PROG
     test_prog( 'negate false bool then use as i64', <<'PROG', 0 );
 my bool $b = false;
 my i64 $v = -$b;
-return $v;
+exit $v;
 PROG
     test_prog( 'negate true bool then use as i32', <<'PROG', 255 );
 my bool $b = true;
 my i32 $v = -$b;
-return $v;
+exit $v;
 PROG
     test_prog( 'double negate bool should return original', <<'PROG', 1 );
 my bool $b = true;
 $b = -$b;
 $b = -$b;
-return $b;
+exit $b;
 PROG
     test_prog( 'negate bool in chained comparison', <<'PROG', 1 );
 my bool $a = true;
 my i64 $x = -$a;
 if ($x != -1) {
-    return 0;
+    exit 0;
 }
-return 1;
+exit 1;
 PROG
     test_prog( 'full fuzz case 7 (seed 100)', <<'PROG', 1 );
 use feature 'brocken_native_types';
@@ -942,7 +942,7 @@ subtest 'stale rodata does not persist between fuzz cases' => sub {
     my $fuzz = Brocken::Fuzz->new( seed => 1 );
     skip 'Not native', 1 unless $fuzz->host->is_native;
     $fuzz->linker->set_rodata( { __stale => "leftover\0" } );
-    my $result = $fuzz->test_program( { source => 'return 5;', expected => 5 } );
+    my $result = $fuzz->test_program( { source => 'exit 5;', expected => 5 } );
     is $result->{status}, 'pass', 'no-string program still runs';
 
     # The compile replaces the linker's table with the case's own module rodata, so the seeded key is gone. Every

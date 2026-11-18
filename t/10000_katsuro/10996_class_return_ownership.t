@@ -51,9 +51,9 @@ my ptr $hb = Brocken::heap_base();
 my i64 $before = Brocken::Runtime::free16_count($hb);
 { my ptr $n = make($p); }
 my i64 $after = Brocken::Runtime::free16_count($hb);
-if ($p->hit() != 1) { return 1; }
-if ($after <= $before) { return 2; }
-return 0;
+if ($p->hit() != 1) { exit 1; }
+if ($after <= $before) { exit 2; }
+exit 0;
 BROCKEN
         0, 'DESTROY ran once and the instance was reclaimed', %native
     );
@@ -66,8 +66,8 @@ subtest 'a returned local is not released by the callee' => sub {
         $setup . <<'BROCKEN',
 my ptr $p = Probe->new();
 { my ptr $n = make_local($p); }
-if ($p->hit() != 1) { return 1; }
-return 0;
+if ($p->hit() != 1) { exit 1; }
+exit 0;
 BROCKEN
         0, 'returning a local transfers it without a premature release', %native
     );
@@ -77,8 +77,8 @@ subtest 'ownership forwards through a returned owned call' => sub {
         $setup . <<'BROCKEN',
 my ptr $p = Probe->new();
 { my ptr $n = wrap($p); }
-if ($p->hit() != 1) { return 1; }
-return 0;
+if ($p->hit() != 1) { exit 1; }
+exit 0;
 BROCKEN
         0, 'a call chain that ends in a fresh construction is owned end to end', %native
     );
@@ -88,8 +88,8 @@ subtest 'a null return fallback does not disqualify ownership' => sub {
         $setup . <<'BROCKEN',
 my ptr $p = Probe->new();
 { my ptr $n = make_checked($p); }
-if ($p->hit() != 1) { return 1; }
-return 0;
+if ($p->hit() != 1) { exit 1; }
+exit 0;
 BROCKEN
         0, 'a conditional fresh return beside `return 0` is still owned', %native
     );
@@ -99,8 +99,8 @@ subtest 'a borrowed `$self` return is not released by the caller' => sub {
         $setup . <<'BROCKEN',
 my ptr $p = Probe->new();
 { my ptr $n = Node->new(probe => $p); my ptr $m = $n->me(); }
-if ($p->hit() != 1) { return 1; }
-return 0;
+if ($p->hit() != 1) { exit 1; }
+exit 0;
 BROCKEN
         0, 'the borrowed receiver is released once, when its owner leaves scope', %native
     );
@@ -113,8 +113,8 @@ subtest 'a borrowed pointer parameter return is not released by the caller' => s
         $setup . <<'BROCKEN',
 my ptr $p = Probe->new();
 { my ptr $n = Node->new(probe => $p); my ptr $m = ident($n); }
-if ($p->hit() != 0) { return 1; }
-return 0;
+if ($p->hit() != 0) { exit 1; }
+exit 0;
 BROCKEN
         0, 'a borrowed parameter return triggers no release on either side', %native
     );
@@ -124,8 +124,8 @@ subtest 'assignment takes ownership of an owned call result' => sub {
         $setup . <<'BROCKEN',
 my ptr $p = Probe->new();
 { my ptr $n = 0; $n = make($p); }
-if ($p->hit() != 1) { return 1; }
-return 0;
+if ($p->hit() != 1) { exit 1; }
+exit 0;
 BROCKEN
         0, 'a null slot that receives an owned instance releases it at scope exit', %native
     );
@@ -135,8 +135,8 @@ subtest 'reassignment releases the displaced instance' => sub {
         $setup . <<'BROCKEN',
 my ptr $p = Probe->new();
 { my ptr $n = Node->new(probe => $p); $n = make($p); }
-if ($p->hit() != 2) { return 1; }
-return 0;
+if ($p->hit() != 2) { exit 1; }
+exit 0;
 BROCKEN
         0, 'the old and the new instance are each released once', %native
     );
@@ -146,8 +146,8 @@ subtest 'assignment to an escaped local stays borrowed' => sub {
         $setup . <<'BROCKEN',
 my ptr $p = Probe->new();
 { my ptr $n = 0; consume($n); $n = make($p); }
-if ($p->hit() != 0) { return 1; }
-return 0;
+if ($p->hit() != 0) { exit 1; }
+exit 0;
 BROCKEN
         0, 'an escaped slot never takes ownership, so nothing is released', %native
     );
@@ -158,7 +158,7 @@ subtest 'the callee transfers and the caller finalizes' => sub {
 class Node { field i64 $x :accessor = 0; }
 sub make_local() :returns(Node) { my ptr $n = Node->new(); return $n; }
 sub drive() :returns(i64) { my ptr $n = make_local(); return 0; }
-return drive();
+exit drive();
 BROCKEN
     ok( !$@, 'compiled the callee/caller pair' ) or diag $@;
 

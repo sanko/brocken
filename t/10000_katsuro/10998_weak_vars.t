@@ -39,7 +39,7 @@ sub hold_weak() :returns(i64) {
     my Any $x :weak = 7;
     return 0;
 }
-return hold_strong() + hold_weak();
+exit hold_strong() + hold_weak();
 BROCKEN
     ok( !$@, 'compiled weak-local program' ) or diag $@;
 
@@ -60,7 +60,7 @@ sub drop() :returns(i64) {
     builtin::weaken($x);
     return 0;
 }
-return drop();
+exit drop();
 BROCKEN
     ok( !$@, 'compiled builtin::weaken program' ) or diag $@;
     my $drop = find_function( $mod, 'drop' )->as_string;
@@ -77,7 +77,7 @@ sub isw() :returns(i64) {
     if (builtin::is_weak($a)) { $a = $a + 10; }
     return $a;
 }
-return isw();
+exit isw();
 BROCKEN
     ok( !$@, 'compiled builtin::is_weak program' ) or diag $@;
 };
@@ -97,7 +97,7 @@ sub dropobj() :returns(i64) {
     builtin::weaken($v);
     return 0;
 }
-return keepobj() + dropobj();
+exit keepobj() + dropobj();
 BROCKEN
     ok( !$@, 'compiled class weaken program' ) or diag $@;
 
@@ -120,7 +120,7 @@ my ptr $hb = Brocken::heap_base();
     my $tmp = 88;
     my Any $x = $tmp;
 }
-return Brocken::Runtime::suspect_count($hb);
+exit Brocken::Runtime::suspect_count($hb);
 BROCKEN
     my $weak = run_brocken(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
@@ -128,7 +128,7 @@ my ptr $hb = Brocken::heap_base();
     my $tmp = 88;
     my Any $x :weak = $tmp;
 }
-return Brocken::Runtime::suspect_count($hb);
+exit Brocken::Runtime::suspect_count($hb);
 BROCKEN
 SKIP: {
         skip 'Not native', 2 unless defined $strong && defined $weak;
@@ -148,7 +148,7 @@ my ptr $hb = Brocken::heap_base();
     my Any $y = 99;
     $x = $y;
 }
-return Brocken::Runtime::suspect_count($hb);
+exit Brocken::Runtime::suspect_count($hb);
 BROCKEN
     my $weak = run_brocken(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
@@ -158,7 +158,7 @@ my ptr $hb = Brocken::heap_base();
     my Any $y = 99;
     $x = $y;
 }
-return Brocken::Runtime::suspect_count($hb);
+exit Brocken::Runtime::suspect_count($hb);
 BROCKEN
 SKIP: {
         skip 'Not native', 2 unless defined $strong && defined $weak;
@@ -176,7 +176,7 @@ my ptr $hb = Brocken::heap_base();
     my $tmp = 88;
     my Any $x :weak = $tmp;
 }
-return Brocken::Runtime::suspect_count($hb);
+exit Brocken::Runtime::suspect_count($hb);
 BROCKEN
     my $unweakened = run_brocken(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
@@ -185,7 +185,7 @@ my ptr $hb = Brocken::heap_base();
     my Any $x :weak = $tmp;
     builtin::unweaken($x);
 }
-return Brocken::Runtime::suspect_count($hb);
+exit Brocken::Runtime::suspect_count($hb);
 BROCKEN
 SKIP: {
         skip 'Not native', 2 unless defined $still_weak && defined $unweakened;
@@ -197,7 +197,7 @@ subtest 'builtin::true and builtin::false are constants' => sub {
     my $code = run_brocken(<<'BROCKEN');
 sub t() :returns(i64) { return builtin::true(); }
 sub f() :returns(i64) { return builtin::false(); }
-return t() * 10 + f();
+exit t() * 10 + f();
 BROCKEN
 SKIP: {
         skip 'Not native', 1 unless defined $code;
@@ -214,7 +214,7 @@ sub strong_bool() :returns(i64) {
     my Any $s = 2;
     return builtin::is_weak($s);
 }
-return weak_bool() * 10 + strong_bool();
+exit weak_bool() * 10 + strong_bool();
 BROCKEN
 SKIP: {
         skip 'Not native', 1 unless defined $code;
@@ -223,11 +223,11 @@ SKIP: {
 };
 subtest 'unknown builtins and variable attributes are rejected' => sub {
     my $c   = Brocken->new;
-    my $ok1 = eval { $c->compile('return builtin::nope();'); 1 };
+    my $ok1 = eval { $c->compile('exit builtin::nope();'); 1 };
     ok( !$ok1, 'unknown builtin is a compile error' );
     like( $@, qr/Unknown builtin 'builtin::nope'/, 'the diagnostic names the builtin' );
     my $c2  = Brocken->new;
-    my $ok2 = eval { $c2->compile('my Any $x :bogus = 1; return 0;'); 1 };
+    my $ok2 = eval { $c2->compile('my Any $x :bogus = 1; exit 0;'); 1 };
     ok( !$ok2, 'unknown variable attribute is a compile error' );
     like( $@, qr/Unknown variable attribute ':bogus'/, 'the diagnostic names the attribute' );
 };

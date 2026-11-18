@@ -44,7 +44,7 @@ subtest 'build IR function with control flow' => sub {
     like $ir, qr/br i1 1, label %then, label %else/, 'conditional branch';
     like $ir, qr/br label %merge/,                   'unconditional branch';
     like $ir, qr/phi/,                               'phi instruction';
-    like $ir, qr/ret i32/,                           'return';
+    like $ir, qr/ret i32/,                           'exit';
 };
 subtest 'build IR module' => sub {
     my $module  = Brocken::Lindsay::IR::Module->new( name => 'testmod' );

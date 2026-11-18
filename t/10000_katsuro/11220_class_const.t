@@ -22,14 +22,14 @@ class C {
     method is_named() :returns(bool) { return __CLASS__ eq "C"; }
 }
 my ptr $c = C->new();
-return $c->is_named() ? 1 : 0;
+exit $c->is_named() ? 1 : 0;
 BROCKEN
     answers( <<'BROCKEN', 1, 'the name is a usable string in a concatenation' );
 class C {
     method is_named() :returns(bool) { return (__CLASS__ . "!") eq "C!"; }
 }
 my ptr $c = C->new();
-return $c->is_named() ? 1 : 0;
+exit $c->is_named() ? 1 : 0;
 BROCKEN
     answers( <<'BROCKEN', 1, 'the name is a usable value in a variable' );
 class C {
@@ -39,7 +39,7 @@ class C {
     }
 }
 my ptr $c = C->new();
-return $c->is_named() ? 1 : 0;
+exit $c->is_named() ? 1 : 0;
 BROCKEN
 };
 subtest '__CLASS__ is qualified by the enclosing package' => sub {
@@ -49,7 +49,7 @@ class C {
     method is_named() :returns(bool) { return __CLASS__ eq "P::C"; }
 }
 my ptr $c = C->new();
-return $c->is_named() ? 1 : 0;
+exit $c->is_named() ? 1 : 0;
 BROCKEN
     answers( <<'BROCKEN', 0, 'the bare class name does not match the qualified one' );
 package P;
@@ -57,7 +57,7 @@ class C {
     method is_named() :returns(bool) { return __CLASS__ eq "C"; }
 }
 my ptr $c = C->new();
-return $c->is_named() ? 1 : 0;
+exit $c->is_named() ? 1 : 0;
 BROCKEN
 };
 subtest '__CLASS__ is usable from a field initializer' => sub {
@@ -66,11 +66,11 @@ class C {
     field ptr $tag :reader = __CLASS__;
 }
 my ptr $c = C->new();
-return $c->tag() eq "C" ? 1 : 0;
+exit $c->tag() eq "C" ? 1 : 0;
 BROCKEN
 };
 subtest '__CLASS__ used outside a class is still a compile error' => sub {
-    my $ok = eval { Brocken->new->compile('return __CLASS__ eq "x" ? 1 : 0;'); 1 };
+    my $ok = eval { Brocken->new->compile('exit __CLASS__ eq "x" ? 1 : 0;'); 1 };
     ok( !$ok, 'a bare __CLASS__ does not compile' );
     like( $@, qr/__CLASS__ used outside of a class/, 'the error names __CLASS__' );
 };

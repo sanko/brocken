@@ -56,25 +56,25 @@ sub host_run ($src) {
     return ( $stdout, $stderr, $status );
 }
 subtest 'an uncaught die ends the process with status 255' => sub {
-    native_case( 'die("boom"); return 0;',                       255, 'die("boom") exits 255' );
-    native_case( 'die; return 0;',                               255, 'bare die exits 255' );
-    native_case( 'my i64 $x = 0; die("no"); $x = 1; return $x;', 255, 'no statement after die runs' );
+    native_case( 'die("boom"); exit 0;',                       255, 'die("boom") exits 255' );
+    native_case( 'die; exit 0;',                               255, 'bare die exits 255' );
+    native_case( 'my i64 $x = 0; die("no"); $x = 1; exit $x;', 255, 'no statement after die runs' );
 };
 subtest 'die unwinds to an enclosing catch' => sub {
-    native_case( 'my i64 $x = 0; try { die "x"; $x = 1; } catch ($e) { $x = 9; } return $x;',
+    native_case( 'my i64 $x = 0; try { die "x"; $x = 1; } catch ($e) { $x = 9; } exit $x;',
         9, 'the rest of the try body is skipped once die raises' );
-    native_case( 'my i64 $x = 0; try { die "a"; } catch ($e) { $x = 1; } finally { $x = $x + 41; } return $x;',
+    native_case( 'my i64 $x = 0; try { die "a"; } catch ($e) { $x = 1; } finally { $x = $x + 41; } exit $x;',
         42, 'finally runs after a caught die' );
 };
 subtest 'die from a callee' => sub {
-    native_case( 'sub f() : returns(i64) { die "in f"; return 0; } return f() + 1;', 255, 'a die in a callee ends the process' );
-    native_case( 'sub f() : returns(i64) { die "x"; return 0; } my i64 $r = 0; try { $r = f(); } catch ($e) { $r = 5; } return $r;',
+    native_case( 'sub f() : returns(i64) { die "in f"; return 0; } exit f() + 1;', 255, 'a die in a callee ends the process' );
+    native_case( 'sub f() : returns(i64) { die "x"; return 0; } my i64 $r = 0; try { $r = f(); } catch ($e) { $r = 5; } exit $r;',
         5, 'a die in a callee unwinds to the caller catch' );
 };
 subtest 'die takes a postfix modifier' => sub {
-    native_case( 'die("no") if true; return 4;',      255, 'die(...) if true fires' );
-    native_case( 'die("no") if false; return 4;',     4,   'die(...) if false is skipped' );
-    native_case( 'die("no") unless false; return 4;', 255, 'die(...) unless false fires' );
+    native_case( 'die("no") if true; exit 4;',      255, 'die(...) if true fires' );
+    native_case( 'die("no") if false; exit 4;',     4,   'die(...) if false is skipped' );
+    native_case( 'die("no") unless false; exit 4;', 255, 'die(...) unless false fires' );
 };
 
 # The snippets below end the process with `exit(N)` rather than a top-level `return N`: a `return` outside a sub is

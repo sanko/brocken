@@ -51,7 +51,7 @@ my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
 my i32 $v4 = 4;
-return $v4;
+exit $v4;
 PROG
     test_prog( '2 mul: return v2', <<'PROG', 3600 & 0xFF );
 my i8 $v1 = -31;
@@ -59,7 +59,7 @@ my i16 $v2 = 60;
 my i32 $v3 = 41;
 my i32 $v4 = 4;
 $v2 = $v2 * $v2;
-return $v2;
+exit $v2;
 PROG
     test_prog( '3 xor: return v4', <<'PROG', 0 );
 my i8 $v1 = -31;
@@ -68,7 +68,7 @@ my i32 $v3 = 41;
 my i32 $v4 = 4;
 $v2 = $v2 * $v2;
 $v4 = $v2 ^ $v2;
-return $v4;
+exit $v4;
 PROG
     test_prog( '4 neg: return v4', <<'PROG', 31 );
 my i8 $v1 = -31;
@@ -78,7 +78,7 @@ my i32 $v4 = 4;
 $v2 = $v2 * $v2;
 $v4 = $v2 ^ $v2;
 $v4 = -$v1;
-return $v4;
+exit $v4;
 PROG
     test_prog( '5 or: return v1', <<'PROG', 31 );
 my i8 $v1 = -31;
@@ -89,7 +89,7 @@ $v2 = $v2 * $v2;
 $v4 = $v2 ^ $v2;
 $v4 = -$v1;
 $v1 = $v4 | $v2;
-return $v1;
+exit $v1;
 PROG
     test_prog( '6 shl: return v2', <<'PROG', 0 );
 my i8 $v1 = -31;
@@ -101,7 +101,7 @@ $v4 = $v2 ^ $v2;
 $v4 = -$v1;
 $v1 = $v4 | $v2;
 $v2 = $v1 << $v1;
-return $v2;
+exit $v2;
 PROG
     test_prog( '7 div: return v1', <<'PROG', 0 );
 my i8 $v1 = -31;
@@ -114,7 +114,7 @@ $v4 = -$v1;
 $v1 = $v4 | $v2;
 $v2 = $v1 << $v1;
 $v1 = $v1 / $v3;
-return $v1;
+exit $v1;
 PROG
     test_prog( '8 shl: return v3', <<'PROG', 41 );
 my i8 $v1 = -31;
@@ -128,7 +128,7 @@ $v1 = $v4 | $v2;
 $v2 = $v1 << $v1;
 $v1 = $v1 / $v3;
 $v3 = $v3 << $v1;
-return $v3;
+exit $v3;
 PROG
     test_prog( '9 final: return v4', <<'PROG', 31 );
 my i8 $v1 = -31;

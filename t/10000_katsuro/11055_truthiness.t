@@ -19,57 +19,57 @@ sub run_case {
 
 # A native scalar keeps its plain zero test: this is not the box path, and 0/0.0 must stay false.
 subtest 'a native scalar is false only at zero' => sub {
-    answers( 'if (0) { return 1; } return 0;',   0, 'int zero is false' );
-    answers( 'if (5) { return 1; } return 0;',   1, 'int five is true' );
-    answers( 'if (-1) { return 1; } return 0;',  1, 'int minus one is true' );
-    answers( 'if (0.0) { return 1; } return 0;', 0, 'zero float is false' );
-    answers( 'if (0.5) { return 1; } return 0;', 1, 'half is true' );
+    answers( 'if (0) { exit 1; } exit 0;',   0, 'int zero is false' );
+    answers( 'if (5) { exit 1; } exit 0;',   1, 'int five is true' );
+    answers( 'if (-1) { exit 1; } exit 0;',  1, 'int minus one is true' );
+    answers( 'if (0.0) { exit 1; } exit 0;', 0, 'zero float is false' );
+    answers( 'if (0.5) { exit 1; } exit 0;', 1, 'half is true' );
 };
 
 # A boxed number follows the numeric part of the rule.
 subtest 'a boxed number is false at zero' => sub {
-    run_case( 'my %h; %h{"k"} = 0; if (%h{"k"}) { return 1; } return 0;',   0, 'boxed zero is false' );
-    run_case( 'my %h; %h{"k"} = 5; if (%h{"k"}) { return 1; } return 0;',   1, 'boxed five is true' );
-    run_case( 'my %h; %h{"k"} = 0.0; if (%h{"k"}) { return 1; } return 0;', 0, 'boxed zero float is false' );
-    run_case( 'my %h; %h{"k"} = 0.5; if (%h{"k"}) { return 1; } return 0;', 1, 'boxed half is true' );
+    run_case( 'my %h; %h{"k"} = 0; if (%h{"k"}) { exit 1; } exit 0;',   0, 'boxed zero is false' );
+    run_case( 'my %h; %h{"k"} = 5; if (%h{"k"}) { exit 1; } exit 0;',   1, 'boxed five is true' );
+    run_case( 'my %h; %h{"k"} = 0.0; if (%h{"k"}) { exit 1; } exit 0;', 0, 'boxed zero float is false' );
+    run_case( 'my %h; %h{"k"} = 0.5; if (%h{"k"}) { exit 1; } exit 0;', 1, 'boxed half is true' );
 };
 
 # A boxed string is where a naive unbox is wrong: "0" and "" must be false, but "00" and "0.0" are true.
 subtest 'a boxed string is false only when empty or "0"' => sub {
-    run_case( 'my %h; %h{"k"} = ""; if (%h{"k"}) { return 1; } return 0;',    0, 'the empty string is false' );
-    run_case( 'my %h; %h{"k"} = "0"; if (%h{"k"}) { return 1; } return 0;',   0, 'the string "0" is false' );
-    run_case( 'my %h; %h{"k"} = "00"; if (%h{"k"}) { return 1; } return 0;',  1, 'the string "00" is true' );
-    run_case( 'my %h; %h{"k"} = "0.0"; if (%h{"k"}) { return 1; } return 0;', 1, 'the string "0.0" is true' );
-    run_case( 'my %h; %h{"k"} = "x"; if (%h{"k"}) { return 1; } return 0;',   1, 'a non-empty string is true' );
+    run_case( 'my %h; %h{"k"} = ""; if (%h{"k"}) { exit 1; } exit 0;',    0, 'the empty string is false' );
+    run_case( 'my %h; %h{"k"} = "0"; if (%h{"k"}) { exit 1; } exit 0;',   0, 'the string "0" is false' );
+    run_case( 'my %h; %h{"k"} = "00"; if (%h{"k"}) { exit 1; } exit 0;',  1, 'the string "00" is true' );
+    run_case( 'my %h; %h{"k"} = "0.0"; if (%h{"k"}) { exit 1; } exit 0;', 1, 'the string "0.0" is true' );
+    run_case( 'my %h; %h{"k"} = "x"; if (%h{"k"}) { exit 1; } exit 0;',   1, 'a non-empty string is true' );
 };
 
 # A missing key yields a null box, which must read as false rather than dereferencing address zero.
 subtest 'a null box is false, not a fault' => sub {
-    run_case( 'my %h; if (%h{"missing"}) { return 1; } return 0;',                               0, 'a missing key (null box) is false' );
-    run_case( 'my Any $a; if ($a) { return 1; } return 0;',                                      0, 'if (null_any) is false' );
-    run_case( 'my Any $a; my Any $b = 5; if ($a) { return 1; } if ($b) { return 2; } return 0;', 2, 'a later true box is still reached' );
+    run_case( 'my %h; if (%h{"missing"}) { exit 1; } exit 0;',                               0, 'a missing key (null box) is false' );
+    run_case( 'my Any $a; if ($a) { exit 1; } exit 0;',                                      0, 'if (null_any) is false' );
+    run_case( 'my Any $a; my Any $b = 5; if ($a) { exit 1; } if ($b) { exit 2; } exit 0;', 2, 'a later true box is still reached' );
 };
 
 # Unary `!` is the same truthiness test, negated.
 subtest 'unary ! follows the same truthiness' => sub {
-    run_case( 'my %h; %h{"k"} = "0"; if (!%h{"k"}) { return 1; } return 0;',  1, '!("0") is true' );
-    run_case( 'my %h; %h{"k"} = "00"; if (!%h{"k"}) { return 1; } return 0;', 0, '!("00") is false' );
-    run_case( 'my Any $a; if (!$a) { return 1; } return 0;',                  1, '!(null box) is true' );
-    run_case( 'my %h; %h{"k"} = 0; if (!%h{"k"}) { return 1; } return 0;',    1, 'boxed zero negates to true' );
-    run_case( 'my %h; %h{"k"} = 5; if (!%h{"k"}) { return 1; } return 0;',    0, 'boxed five negates to false' );
+    run_case( 'my %h; %h{"k"} = "0"; if (!%h{"k"}) { exit 1; } exit 0;',  1, '!("0") is true' );
+    run_case( 'my %h; %h{"k"} = "00"; if (!%h{"k"}) { exit 1; } exit 0;', 0, '!("00") is false' );
+    run_case( 'my Any $a; if (!$a) { exit 1; } exit 0;',                  1, '!(null box) is true' );
+    run_case( 'my %h; %h{"k"} = 0; if (!%h{"k"}) { exit 1; } exit 0;',    1, 'boxed zero negates to true' );
+    run_case( 'my %h; %h{"k"} = 5; if (!%h{"k"}) { exit 1; } exit 0;',    0, 'boxed five negates to false' );
 };
 
 # A boxed condition drives a while loop, and a false box never enters the body.
 subtest 'a boxed condition drives a while loop' => sub {
-    run_case( 'my %h; %h{"s"} = "x"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; if ($n == 3) { %h{"s"} = ""; } } return $n;',
+    run_case( 'my %h; %h{"s"} = "x"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; if ($n == 3) { %h{"s"} = ""; } } exit $n;',
         3, 'the loop runs while the box is true' );
-    run_case( 'my %h; %h{"s"} = "0"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; %h{"s"} = ""; } return $n;',
+    run_case( 'my %h; %h{"s"} = "0"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; %h{"s"} = ""; } exit $n;',
         0, 'a false box never enters the body' );
 };
 
 # A boolean expression stored into the hash is a box too, and reads back by the same rule.
 subtest 'a boxed comparison reads back by its value' => sub {
-    run_case( 'my %h; %h{"k"} = (5 > 3); if (%h{"k"}) { return 1; } return 0;', 1, 'a true comparison is true' );
-    run_case( 'my %h; %h{"k"} = (5 < 3); if (%h{"k"}) { return 1; } return 0;', 0, 'a false comparison is false' );
+    run_case( 'my %h; %h{"k"} = (5 > 3); if (%h{"k"}) { exit 1; } exit 0;', 1, 'a true comparison is true' );
+    run_case( 'my %h; %h{"k"} = (5 < 3); if (%h{"k"}) { exit 1; } exit 0;', 0, 'a false comparison is false' );
 };
 done_testing;

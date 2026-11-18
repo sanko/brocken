@@ -3515,21 +3515,35 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $fn;
     }
 
-    # `exit(CODE)` terminates the process through libc `exit`, which flushes stdio before returning to the OS -- the
-    # reason it is a call and not a raw syscall: `say`/`print` write through buffered `puts`, so a raw syscall would
-    # drop output written but not yet flushed. The call never returns, so the block is closed with a branch to a
-    # continuation block that the code after `exit` unwinds into (as `lower_throw` does for `longjmp`), keeping the
-    # CFG well-formed. Native-only for now: a Wasm module has no `exit` import (its runner, WASI, would need
-    # `proc_exit`), and the Wasm backend is already excluded from the exit tests.
+    # `exit CODE` terminates the process. An `exit` written directly in `_BROCKEN_ENTRY` (including one nested in a
+    # block, branch or loop of that function) is exactly a top-level `return CODE`: the entry's i64 return is the
+    # program's status, and each target's entry stub already turns it into the process status -- the PE and ARM64 stubs
+    # truncate it to the low 8 bits, MachO hands it to `exit`. Lowering it to a `ret` from the entry therefore ends the
+    # run the way `return` does, and, on a native target, flushes stdio through the same path a top-level `return`
+    # already uses. (Calling libc `exit` here instead would also work, but it would pass the status through full width:
+    # a negative status then became a 32-bit exit code with the high bit set, which some Windows process spawners
+    # refuse, even though the low byte is what every runner reads.)
+    #
+    # An `exit` inside a nested function cannot be a `ret` -- that would only end the callee -- so it becomes a call to
+    # libc `exit`, which flushes stdio before returning to the OS. That call never returns, so the block is closed with
+    # a branch to a continuation block that the code after `exit` unwinds into (as `lower_throw` does for `longjmp`),
+    # keeping the CFG well-formed. A Wasm module has no `exit` import (its runner, WASI, would need `proc_exit`, and the
+    # linker emits no import section), so a nested `exit` stays native-only; the top-level `ret` above is what lets a
+    # value-checking snippet spell its result `exit N` on both backends.
     method lower_exit($ast) {
         my ( $line, $col ) = ( $ast->line, $ast->col );
         my $code
             = $ast->code ? $self->maybe_convert_type( $self->lower_expression( $ast->code ), Brocken::Lindsay::IR::Type::i64(), $line, $col, 0 ) :
             Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
-        my $exit_fn = $self->_ensure_extern( 'exit', Brocken::Lindsay::IR::Type::void(), [ Brocken::Lindsay::IR::Type::i64() ] );
-        $builder->build_call( $exit_fn, [$code], undef, $line, $col );
+        if ( $current_func->name eq '_BROCKEN_ENTRY' ) {
+            $builder->build_ret( $code, $line, $col );
+        }
+        else {
+            my $exit_fn = $self->_ensure_extern( 'exit', Brocken::Lindsay::IR::Type::void(), [ Brocken::Lindsay::IR::Type::i64() ] );
+            $builder->build_call( $exit_fn, [$code], undef, $line, $col );
+        }
         my $cont = $current_func->append_block( $self->unique_block_name('exit_cont') );
-        $builder->build_br( $cont, $line, $col );
+        $builder->build_br( $cont, $line, $col ) unless $current_block->terminator;
         $builder->position_at_end($cont);
         $current_block = $cont;
     }

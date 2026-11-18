@@ -15,7 +15,7 @@ SKIP: {
 my i64 $x = 10;
 my i64 $y = 20;
 my i64 $z = $x + $y;
-return $z;
+exit $z;
 BROCKEN
         my $module    = Brocken->new->compile( $source, 'test_dwarf.brocken' );
         my $ir_funcs  = $module->functions;

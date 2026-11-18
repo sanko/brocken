@@ -48,7 +48,7 @@ subtest 'a nested call does not reuse the caller\'s frame' => sub {
     answers(
         'sub inner(i64 $x) :returns(i64) { my i64 $t = $x + 1; my i64 $u = $t * 3; return $u; }
          sub outer(i64 $x) :returns(i64) { my i64 $k = $x * 2; my i64 $v = inner($k); return $v + $x; }
-         return outer(10) & 255;', ( ( ( 10 * 2 + 1 ) * 3 ) + 10 ) & 255, 'the callee carves its frame above the caller\'s'
+         exit outer(10) & 255;', ( ( ( 10 * 2 + 1 ) * 3 ) + 10 ) & 255, 'the callee carves its frame above the caller\'s'
     );
 
     # The same, with the inner call made twice: a per-function bump pointer hands the caller the same addresses back on
@@ -56,7 +56,7 @@ subtest 'a nested call does not reuse the caller\'s frame' => sub {
     answers(
         'sub d(i64 $x) :returns(i64) { my i64 $t = $x * 2; return $t; }
          sub c(i64 $x) :returns(i64) { my i64 $a = d($x); my i64 $b = d($x + 1); return $a + $b; }
-         return c(20) & 255;', ( 40 + 42 ) & 255, 'two calls in one function each get their own frame'
+         exit c(20) & 255;', ( 40 + 42 ) & 255, 'two calls in one function each get their own frame'
     );
 
     # A caller that keeps a value live across the call. This is the shape the
@@ -64,47 +64,47 @@ subtest 'a nested call does not reuse the caller\'s frame' => sub {
     answers(
         'sub g(i64 $p) :returns(i64) { my i64 $h = $p; my i64 $r = f($h); return $r + $h; }
          sub f(i64 $p) :returns(i64) { my i64 $a = $p; my i64 $b = $a + 5; my i64 $c = $b + 5; return $c; }
-         return g(7) & 255;', ( 7 + 5 + 5 ) + 7, 'a value live across a call survives it'
+         exit g(7) & 255;', ( 7 + 5 + 5 ) + 7, 'a value live across a call survives it'
     );
 };
 subtest 'recursion frames do not overlap' => sub {
 
     # Every activation of `f` is live at once, so a per-function bump pointer collapses the whole chain onto one frame
     # and the recursion has nothing left to distinguish.
-    answers( 'sub f(i64 $n) :returns(i64) { if ($n <= 0) { return 0; } return f($n - 1) + 1; } return f(100) & 255;',
+    answers( 'sub f(i64 $n) :returns(i64) { if ($n <= 0) { return 0; } return f($n - 1) + 1; } exit f(100) & 255;',
         100, 'a 100 deep recursion accumulates correctly' );
 
     # Each activation has several live values, so a shared frame shows up as a
     # wrong result rather than as a trap.
-    answers( 'sub fib(i64 $n) :returns(i64) { if ($n < 2) { return $n; } return fib($n - 1) + fib($n - 2); } return fib(16) & 255;',
+    answers( 'sub fib(i64 $n) :returns(i64) { if ($n < 2) { return $n; } return fib($n - 1) + fib($n - 2); } exit fib(16) & 255;',
         987 & 255, 'a recursive call tree keeps every frame intact' );
 };
 subtest 'the runtime unbox helpers work on the Wasm target' => sub {
 
     # These are the functions that exposed the fault. Each has a frame and calls `box_tag`, which has one too, so before
     # the fix every one of them trapped.
-    answers( 'my $x = 2.5; my i64 $j = Brocken::Runtime::unbox_i64($x); return $j == 2 ? 1 : 0;',   1, 'a float box unboxes as an integer' );
-    answers( 'my $x = 42; my i64 $j = Brocken::Runtime::unbox_i64($x); return $j == 42 ? 1 : 0;',   1, 'an integer box unboxes as an integer' );
-    answers( 'my $x = 2.5; my f64 $f = Brocken::Runtime::unbox_f64($x); return $f == 2.5 ? 1 : 0;', 1, 'a float box unboxes as a float' );
-    answers( 'my $x = 42; my f64 $f = Brocken::Runtime::unbox_f64($x); return $f == 42.0 ? 1 : 0;', 1, 'an integer box unboxes as a float' );
+    answers( 'my $x = 2.5; my i64 $j = Brocken::Runtime::unbox_i64($x); exit $j == 2 ? 1 : 0;',   1, 'a float box unboxes as an integer' );
+    answers( 'my $x = 42; my i64 $j = Brocken::Runtime::unbox_i64($x); exit $j == 42 ? 1 : 0;',   1, 'an integer box unboxes as an integer' );
+    answers( 'my $x = 2.5; my f64 $f = Brocken::Runtime::unbox_f64($x); exit $f == 2.5 ? 1 : 0;', 1, 'a float box unboxes as a float' );
+    answers( 'my $x = 42; my f64 $f = Brocken::Runtime::unbox_f64($x); exit $f == 42.0 ? 1 : 0;', 1, 'an integer box unboxes as a float' );
 
     # `unbox_f64` calls both `box_tag` and `unbox_i64`, so it nests two frames
     # deep over its own.
-    answers( 'my $x = -2.5; my f64 $f = Brocken::Runtime::unbox_f64($x); return $f == -2.5 ? 1 : 0;', 1, 'a negative float box unboxes as a float' );
+    answers( 'my $x = -2.5; my f64 $f = Brocken::Runtime::unbox_f64($x); exit $f == -2.5 ? 1 : 0;', 1, 'a negative float box unboxes as a float' );
 };
 subtest 'faults this frame collision had been blamed for' => sub {
 
     # A 64-bit value that has to survive a shift and a mask. It read back a clobbered slot on Wasm and trapped; the
     # native target has always agreed with the expectation.
-    answers( 'my i64 $a = 0; my i64 $b = 4294967296; my $c = $a - $b; my $r = $c >> 32; return $r & 255;',
+    answers( 'my i64 $a = 0; my i64 $b = 4294967296; my $c = $a - $b; my $r = $c >> 32; exit $r & 255;',
         255, 'a wide subtraction, shift and mask agree with the native target' );
 
     # Assignment between two boxes of the same type, which reads the source through a saved pointer after the call that
     # filled the frame returned.
-    answers( 'my $a = 42; my $b = 0; $b = $a; return $b == 42 ? 1 : 0;',     1, 'one box assigned to another keeps its value' );
-    answers( 'my $a = 42; $a = $a; return $a == 42 ? 1 : 0;',                1, 'a box assigned to itself keeps its value' );
-    answers( 'my $a = 2.5; my $b = 0.0; $b = $a; return $b == 2.5 ? 1 : 0;', 1, 'one float box assigned to another keeps its value' );
-    answers( 'my $a = 2.5; $a = $a; return $a == 2.5 ? 1 : 0;',              1, 'a float box assigned to itself keeps its value' );
+    answers( 'my $a = 42; my $b = 0; $b = $a; exit $b == 42 ? 1 : 0;',     1, 'one box assigned to another keeps its value' );
+    answers( 'my $a = 42; $a = $a; exit $a == 42 ? 1 : 0;',                1, 'a box assigned to itself keeps its value' );
+    answers( 'my $a = 2.5; my $b = 0.0; $b = $a; exit $b == 2.5 ? 1 : 0;', 1, 'one float box assigned to another keeps its value' );
+    answers( 'my $a = 2.5; $a = $a; exit $a == 2.5 ? 1 : 0;',              1, 'a float box assigned to itself keeps its value' );
 };
 subtest 'the bump pointer is a module global' => sub {
 
@@ -115,7 +115,7 @@ subtest 'the bump pointer is a module global' => sub {
 
     # The instance's own linker already carries the rodata `compile` interned (the runtime's strings), so a bare
     # `Linker::Wasm->new` would fail to resolve them.
-    my $module = $brocken->compile('return 1;');
+    my $module = $brocken->compile('exit 1;');
     $brocken->linker->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
     my $bytes = do { open my $fh, '<:raw', $file or die $!; local $/; <$fh> };
     unlink $file if -e $file;

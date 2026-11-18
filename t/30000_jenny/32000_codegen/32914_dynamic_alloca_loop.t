@@ -29,7 +29,7 @@ while (\$i < $ITERS) {
     \$sum = \$sum + \@buf[0] + \@buf[$N - 1];
     \$i = \$i + 1;
 }
-return \$sum % 251;
+exit \$sum % 251;
 BROCKEN
 
 # Reads the lowering of `_BROCKEN_ENTRY` and returns [entry_body_ops, all_block_op_lists] as opcode arrays.
@@ -77,7 +77,7 @@ while ($i < 3) {
     $i = $i + 1;
 }
 @big[0] = 5;
-return @big[0] + $i;
+exit @big[0] + $i;
 BROCKEN
     for my $target (@TARGETS) {
         my ( $triple, $class )     = @$target;
@@ -115,7 +115,7 @@ while ($i < 200) {
     }
     $sum = $sum + @buf[0] + 1;
 }
-return $sum % 251;
+exit $sum % 251;
 BROCKEN
     my $module = Brocken->new->compile($src);
     my $out    = $brocken->tmpdir . '/dyn_loop' . $brocken->ext;
@@ -139,8 +139,8 @@ while ($i < 300) {
 my ptr $hb = Brocken::heap_base();
 my ptr $hc = Brocken::Runtime::heap_cursor($hb);
 my i64 $used = Brocken::ptr_sub($hc, $hb);
-if (Brocken::ptr_cmp_gt($used, 2000000)) { return 2; }
-return 0;
+if (Brocken::ptr_cmp_gt($used, 2000000)) { exit 2; }
+exit 0;
 BROCKEN
     my $module = Brocken->new->compile($src);
     my $out    = $brocken->tmpdir . '/dyn_bounded' . $brocken->ext;
@@ -174,7 +174,7 @@ while ($i < 40) {
 @sink[0] = $seed;
 @sink[1] = $i;
 @sink[2] = $mark;
-return @sink[0] + @sink[1] + @sink[2];
+exit @sink[0] + @sink[1] + @sink[2];
 BROCKEN
     my $module = Brocken->new->compile($src);
     my $out    = $brocken->tmpdir . '/dyn_guard' . $brocken->ext;

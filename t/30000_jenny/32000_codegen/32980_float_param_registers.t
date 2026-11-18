@@ -47,8 +47,8 @@ sub g( @{[ join ', ', @params ]} ) :returns(i64) {
 $setup
 my i64 \$want = 0;
 $want
-if (g( $call ) == \$want) { return 42; }
-return 1;
+if (g( $call ) == \$want) { exit 42; }
+exit 1;
 BROCKEN
         is( run($src), 42, "native: $n of $fp_args f64 parameter(s) in registers" );
     }

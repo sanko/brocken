@@ -18,7 +18,7 @@ subtest 'assigning a method parameter into a field keeps it alive' => sub {
             ' my ptr $h = Holder->new();' .
             '{ my $tmp = 123; $h->put($tmp); }' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         123,
         'the field still holds the caller box after the block exits',
         targets => [@native]
@@ -33,7 +33,7 @@ subtest 'a generated writer takes its own reference' => sub {
             ' $h->set_v($src);' .
             ' $src = 0;' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         45,
         'overwriting the source local does not free the field box',
         targets => [@native]
@@ -46,7 +46,7 @@ subtest 'a positional constructor field takes its own reference' => sub {
             ' my ptr $h = Holder->new($src);' .
             ' $src = 999;' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         88,
         'the constructor incref keeps the box after the source is replaced',
         targets => [@native]
@@ -59,7 +59,7 @@ subtest 'a named constructor field takes its own reference' => sub {
             ' my ptr $h = Holder->new(v => $src);' .
             ' $src = 0;' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         201,
         'the hash-override store also increfs the caller box',
         targets => [@native]
@@ -70,7 +70,7 @@ subtest 'a default field still reads back its initializer' => sub {
         'class Holder { field Any $v = 12; method get() :returns(Any) { return $v; } }' .
             ' my ptr $h = Holder->new();' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         12,
         'the owned store leaves a plain default intact',
         targets => [@native]

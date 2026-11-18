@@ -21,7 +21,7 @@ my ptr $block0 = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 # Raw 16-byte cell in block 0 with RC=1, tag=0.
 my ptr $a = Brocken::Runtime::bump_alloc($hb, 16);
 Brocken::store_i64($a, 1);
-if (Brocken::ptr_cmp_eq(Brocken::Runtime::block_of($hb, $a), $block0) == 0) { return 1; }
+if (Brocken::ptr_cmp_eq(Brocken::Runtime::block_of($hb, $a), $block0) == 0) { exit 1; }
 # Force block 0 to look full, then allocate: the runtime must carve a fresh block.
 my ptr $block_end = Brocken::ptr_add($block0, 32752);
 my ptr $fake_end = Brocken::ptr_sub($block_end, 16);
@@ -35,13 +35,13 @@ while (Brocken::ptr_cmp_gt(128, $i)) {
 my ptr $b = Brocken::Runtime::bump_alloc($hb, 16);
 Brocken::store_i64($b, 1);
 my ptr $block1 = Brocken::load_i64(Brocken::ptr_add($hb, 80));
-if (Brocken::ptr_cmp_eq($block1, $block0)) { return 2; }
+if (Brocken::ptr_cmp_eq($block1, $block0)) { exit 2; }
 # Blocks tile one grid: block 1 begins exactly where block 0 ends (no ICB-sized overlap).
-if (Brocken::ptr_cmp_eq(Brocken::ptr_sub($block1, $block0), Brocken::Runtime::block_size()) == 0) { return 3; }
-if (Brocken::ptr_cmp_ge($block1, Brocken::ptr_add($block0, Brocken::Runtime::block_size())) == 0) { return 4; }
-if (Brocken::ptr_cmp_eq(Brocken::Runtime::block_of($hb, $a), $block0) == 0) { return 5; }
-if (Brocken::ptr_cmp_eq(Brocken::Runtime::block_of($hb, $b), $block1) == 0) { return 6; }
-return 0;
+if (Brocken::ptr_cmp_eq(Brocken::ptr_sub($block1, $block0), Brocken::Runtime::block_size()) == 0) { exit 3; }
+if (Brocken::ptr_cmp_ge($block1, Brocken::ptr_add($block0, Brocken::Runtime::block_size())) == 0) { exit 4; }
+if (Brocken::ptr_cmp_eq(Brocken::Runtime::block_of($hb, $a), $block0) == 0) { exit 5; }
+if (Brocken::ptr_cmp_eq(Brocken::Runtime::block_of($hb, $b), $block1) == 0) { exit 6; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_block_owner_of' . $brocken->ext;
@@ -74,18 +74,18 @@ while (Brocken::ptr_cmp_gt(128, $i)) {
 my ptr $b = Brocken::Runtime::bump_alloc($hb, 16);
 Brocken::store_i64($b, 1);
 my ptr $block1 = Brocken::load_i64(Brocken::ptr_add($hb, 80));
-if (Brocken::ptr_cmp_eq($block1, $block0)) { return 1; }
+if (Brocken::ptr_cmp_eq($block1, $block0)) { exit 1; }
 my i64 $lc0_before = Brocken::load_i64(Brocken::ptr_add($block0, 32752));
 my i64 $lc1_before = Brocken::load_i64(Brocken::ptr_add($block1, 32752));
-if ($lc0_before != 1) { return 2; }
-if ($lc1_before != 1) { return 3; }
+if ($lc0_before != 1) { exit 2; }
+if ($lc1_before != 1) { exit 3; }
 # block 1 is current; freeing the block-0 object must charge block 0.
 Brocken::Runtime::decref($a, $hb);
 my i64 $lc0_after = Brocken::load_i64(Brocken::ptr_add($block0, 32752));
 my i64 $lc1_after = Brocken::load_i64(Brocken::ptr_add($block1, 32752));
-if ($lc0_after != 0) { return 4; }
-if ($lc1_after != $lc1_before) { return 5; }
-return 0;
+if ($lc0_after != 0) { exit 4; }
+if ($lc1_after != $lc1_before) { exit 5; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_block_owner_decref' . $brocken->ext;
@@ -117,19 +117,19 @@ while (Brocken::ptr_cmp_gt(128, $i)) {
 my ptr $b = Brocken::Runtime::bump_alloc($hb, 16);
 Brocken::store_i64($b, 2);
 my ptr $block1 = Brocken::load_i64(Brocken::ptr_add($hb, 80));
-if (Brocken::ptr_cmp_eq($block1, $block0)) { return 1; }
+if (Brocken::ptr_cmp_eq($block1, $block0)) { exit 1; }
 # RC 2 -> 1: the object survives, so block 0 is untouched. This first decrement also pushes $a onto the
 # suspect buffer, whose node is allocated from the current block 1 -- measure block 1 after that push.
 Brocken::Runtime::gc_decref($a, $hb);
-if (Brocken::load_i64(Brocken::ptr_add($block0, 32752)) != 1) { return 2; }
+if (Brocken::load_i64(Brocken::ptr_add($block0, 32752)) != 1) { exit 2; }
 my i64 $lc1_before = Brocken::load_i64(Brocken::ptr_add($block1, 32752));
 # RC 1 -> 0: reclamation is deferred to the collector's sweep, which must charge the owning block 0,
 # not the current block 1.
 Brocken::Runtime::gc_decref($a, $hb);
 Brocken::Runtime::gc_drain($hb);
-if (Brocken::load_i64(Brocken::ptr_add($block0, 32752)) != 0) { return 4; }
-if (Brocken::load_i64(Brocken::ptr_add($block1, 32752)) != $lc1_before) { return 5; }
-return 0;
+if (Brocken::load_i64(Brocken::ptr_add($block0, 32752)) != 0) { exit 4; }
+if (Brocken::load_i64(Brocken::ptr_add($block1, 32752)) != $lc1_before) { exit 5; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_block_owner_gc_decref' . $brocken->ext;

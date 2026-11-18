@@ -14,15 +14,15 @@ SKIP: {
 my ptr $hb = Brocken::heap_base();
 # memory_limit is 0 (default from _init) — unlimited
 my i64 $limit = Brocken::load_i64(Brocken::ptr_add($hb, 88));
-if ($limit != 0) { return 1; }
+if ($limit != 0) { exit 1; }
 # Allocate several Any values — should never fail
 my $a = 1;
 my $b = 2;
 my $c = 3;
 # Check err_code is still 0
 my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72));
-if ($err != 0) { return 2; }
-return 0;
+if ($err != 0) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_mem_unlim' . $brocken->ext;
@@ -42,14 +42,14 @@ my ptr $hb = Brocken::heap_base();
 # Set memory_limit to 100 bytes
 Brocken::store_i64(Brocken::ptr_add($hb, 88), 100);
 my i64 $limit = Brocken::load_i64(Brocken::ptr_add($hb, 88));
-if ($limit != 100) { return 1; }
+if ($limit != 100) { exit 1; }
 # Set memory_used to 0 to start fresh
 Brocken::store_i64(Brocken::ptr_add($hb, 96), 0);
 # Allocate one Any (16 bytes) — should succeed since 16 < 100
 my $x = 42;
 my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72));
-if ($err != 0) { return 2; }
-return 0;
+if ($err != 0) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_mem_set' . $brocken->ext;
@@ -82,10 +82,10 @@ Brocken::store_i64(Brocken::ptr_add($hb, 72), 0);
 my ptr $result = Brocken::Runtime::bump_alloc($hb, 16);
 # err_code should be 1 (OOM)
 my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72));
-if ($err != 1) { return 1; }
+if ($err != 1) { exit 1; }
 # result should be 0 (null pointer from OOM)
-if (Brocken::ptr_cmp_eq($result, 0) == 0) { return 2; }
-return 0;
+if (Brocken::ptr_cmp_eq($result, 0) == 0) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_mem_oom' . $brocken->ext;
@@ -113,8 +113,8 @@ my i64 $used = Brocken::load_i64(Brocken::ptr_add($hb, 96));
 # Each Any allocation goes through bump_alloc and increments memory_used The bump_alloc memory_used increments happen
 # per bump_alloc call, but the free16 hot-path does NOT increment memory_used.
 # After 3 fresh allocations (no free16 recycling), memory_used should be >= 48
-if ($used < 48) { return 1; }
-return 0;
+if ($used < 48) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_mem_used' . $brocken->ext;
@@ -149,10 +149,10 @@ Brocken::store_i64(Brocken::ptr_add($hb, 72), 0);
 my ptr $result = Brocken::Runtime::bump_alloc($hb, 16);
 # err_code should be 1 (OOM)
 my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72));
-if ($err != 1) { return 1; }
+if ($err != 1) { exit 1; }
 # result should be null
-if (Brocken::ptr_cmp_eq($result, 0) == 0) { return 2; }
-return 0;
+if (Brocken::ptr_cmp_eq($result, 0) == 0) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_mem_boundary' . $brocken->ext;

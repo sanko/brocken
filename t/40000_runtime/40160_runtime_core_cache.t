@@ -21,14 +21,14 @@ my ptr $hb = Brocken::heap_base();
 my ptr $s  = "Hello World";
 say( Brocken::Runtime::str_len($s) );
 say( Brocken::Runtime::str_substr_rest( $hb, $s, 6 ) );
-return 0;
+exit 0;
 BROCKEN
     my $b = rodata_for(<<'BROCKEN');
 my $dyn = "Brocken";
 say( length($dyn) );
 say( lc($dyn) );
 say( ucfirst("brocken") );
-return 0;
+exit 0;
 BROCKEN
     my @conflicts;
     for my $label ( sort keys %$a ) {
@@ -42,7 +42,7 @@ BROCKEN
     ok defined $label_hello_a, 'the first compile interned "Hello World"';
     my $c = rodata_for(<<'BROCKEN');
 my ptr $s = "Hello World";
-return Brocken::Runtime::str_len($s);
+exit Brocken::Runtime::str_len($s);
 BROCKEN
     my ($label_hello_c) = grep { $c->{$_} eq "Hello World\0" } keys %$c;
     is $label_hello_c, $label_hello_a, 'the same literal interns to the same label regardless of surrounding code';
@@ -51,7 +51,7 @@ subtest 'compiling the same program twice is byte-for-byte deterministic' => sub
     my $src = <<'BROCKEN';
 my $dyn = "Brocken";
 say( length($dyn) );
-return 0;
+exit 0;
 BROCKEN
     my $first  = rodata_for($src);
     my $second = rodata_for($src);
@@ -70,10 +70,10 @@ subtest 'a second program in one process still runs with correct string output' 
         my $out = `$exe`;
         return ( $? >> 8, $out );
     };
-    my ( $rc1, $out1 ) = $run->("say(\"first program\");\nreturn 0;\n");
+    my ( $rc1, $out1 ) = $run->("say(\"first program\");\nexit 0;\n");
     is $rc1,  0,                 'the first program exits cleanly';
     is $out1, "first program\n", 'the first program prints its literal';
-    my ( $rc2, $out2 ) = $run->("my \$s = \"second program\";\nsay(\$s);\nsay( uc(\$s) );\nreturn 0;\n");
+    my ( $rc2, $out2 ) = $run->("my \$s = \"second program\";\nsay(\$s);\nsay( uc(\$s) );\nexit 0;\n");
     is $rc2,  0,                                  'the second program exits cleanly';
     is $out2, "second program\nSECOND PROGRAM\n", 'the second program prints its own literals, not the cached ones';
 };

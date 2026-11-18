@@ -9,7 +9,7 @@ use feature qw[class];
 subtest 'String constant compiles and produces RodataRef in IR' => sub {
     my $module = Brocken->new->compile(<<~'BROCKEN');
         my String $x = "hello";
-        return 42;
+        exit 42;
         BROCKEN
     my $rodata = $module->rodata;
     is $rodata,                    D(), 'module has rodata hash';
@@ -30,7 +30,7 @@ subtest 'String constant through codegen and linker' => sub {
     my $module  = Brocken->new->compile(<<~'BROCKEN');
         my String $x = "Hello, world!";
         say($x);
-        return 0;
+        exit 0;
         BROCKEN
     my $rodata = $module->rodata;
     is $rodata, D(), 'module has rodata before codegen';
@@ -63,7 +63,7 @@ SKIP: {
 subtest 'String concat folds two RodataRef strings' => sub {
     my $module = Brocken->new->compile(<<~'BROCKEN');
         my String $x = "hello " . "world";
-        return 0;
+        exit 0;
         BROCKEN
     my $rodata = $module->rodata;
     is $rodata, D(), 'module has rodata';
@@ -76,7 +76,7 @@ subtest 'String concat folds two RodataRef strings' => sub {
 subtest 'Parser accepts . as binary operator' => sub {
     my $ast = Brocken->new->parse(<<~'BROCKEN');
         my String $x = "a" . "b";
-        return 0;
+        exit 0;
         BROCKEN
     my $decl = $ast->statements->[0];
     is $decl, D(), 'first statement is decl';
@@ -91,7 +91,7 @@ subtest 'String concat through codegen and linker (constant fold)' => sub {
     my $host    = $brocken->platform;
     my $module  = Brocken->new->compile(<<'BROCKEN');
 say("Hello " . "world!");
-return 0;
+exit 0;
 BROCKEN
     my $rodata = $module->rodata;
     is $rodata, D(), 'module has rodata';
@@ -121,7 +121,7 @@ subtest 'String . integer runtime concat (say "hello " . 42)' => sub {
     my $host    = $brocken->platform;
     my $module  = Brocken->new->compile(<<~'BROCKEN');
         say("hello " . 42);
-        return 0;
+        exit 0;
         BROCKEN
     my $rodata = $module->rodata;
     is $rodata, D(), 'module has rodata';
@@ -146,7 +146,7 @@ subtest 'Integer . string runtime concat (say 42 . " hello")' => sub {
     my $host    = $brocken->platform;
     my $module  = Brocken->new->compile(<<'BROCKEN');
 say(42 . " hello");
-return 0;
+exit 0;
 BROCKEN
     my $rodata = $module->rodata;
     is $rodata, D(), 'module has rodata';
@@ -171,7 +171,7 @@ subtest 'Integer . integer runtime concat (say 5 . 10)' => sub {
     my $host    = $brocken->platform;
     my $module  = Brocken->new->compile(<<'BROCKEN');
 say(5 . 10);
-return 0;
+exit 0;
 BROCKEN
     my $rodata = $module->rodata;
     is $rodata, D(), 'module has rodata';

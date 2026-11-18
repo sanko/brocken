@@ -18,7 +18,7 @@ class Point {
     field i64 $x :param :reader;
 }
 my ptr $p = Point->new(x => 42);
-return $p->x();
+exit $p->x();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_class_alloc' . $brocken->ext;
@@ -41,7 +41,7 @@ class Point {
     }
 }
 my ptr $p = Point->new(x => 3);
-return $p->x();
+exit $p->x();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_class_adjust' . $brocken->ext;
@@ -62,7 +62,7 @@ class Point {
     method double() :returns(i64) { return $x * 2; }
 }
 my ptr $p = Point->new(x => 21);
-return $p->double();
+exit $p->double();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_class_method' . $brocken->ext;
@@ -83,7 +83,7 @@ class Counter {
 }
 my ptr $c = Counter->new(count => 10);
 $c->set_count(32);
-return $c->count();
+exit $c->count();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_class_writer' . $brocken->ext;
@@ -104,7 +104,7 @@ class Accessor {
 }
 my ptr $a = Accessor->new(value => 11);
 $a->set_value(29);
-return $a->value();
+exit $a->value();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_class_accessor' . $brocken->ext;
@@ -126,7 +126,7 @@ class Pair {
 }
 my ptr $p = Pair->new(a => 1, b => 2);
 $p->set_a(5)->set_b(7);
-return $p->a + $p->b;
+exit $p->a + $p->b;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_class_chain' . $brocken->ext;
@@ -147,7 +147,7 @@ class Counter {
 }
 my ptr $zero = Counter->new(count => 0);
 my ptr $nine = Counter->new(count => 9);
-return $zero->count()*10 + $nine->count();
+exit $zero->count()*10 + $nine->count();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_class_or_default' . $brocken->ext;
@@ -168,8 +168,8 @@ class Reading {
 }
 my ptr $zero = Reading->new(v => 0.0);
 my ptr $nine = Reading->new(v => 9.5);
-if ($zero->v() > 2.4 && $zero->v() < 2.6 && $nine->v() > 9.4 && $nine->v() < 9.6) { return 1; }
-return 0;
+if ($zero->v() > 2.4 && $zero->v() < 2.6 && $nine->v() > 9.4 && $nine->v() < 9.6) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_class_float_or_default' . $brocken->ext;
@@ -192,7 +192,7 @@ class Counter {
 }
 my ptr $lo = Counter->new(count => 0);
 my ptr $hi = Counter->new(count => 500);
-return $lo->count()*10 + $hi->count();
+exit $lo->count()*10 + $hi->count();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_class_multi_adjust' . $brocken->ext;

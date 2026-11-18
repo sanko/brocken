@@ -12,49 +12,49 @@ use Test2::Tools::Brocken qw[executable_targets];
 my @native_targets = grep { $_->[0] ne 'wasm32-unknown-wasi' } executable_targets();
 sub answers ( $source, $want, $label ) { Test2::Tools::Brocken::answers( $source, $want, $label, targets => [@native_targets] ) }
 subtest 'keys yields the keys in insertion order' => sub {
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } return $t;',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } exit $t;',
         123, 'the values read back through the keys follow insertion order' );
 
     # Inserting in the opposite order iterates in that order: b was inserted first, so it leads even though a sorts
     # before it.
-    answers( 'my %h; %h{"b"}=2; %h{"a"}=1; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } return $t;',
+    answers( 'my %h; %h{"b"}=2; %h{"a"}=1; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } exit $t;',
         21, 'reversing the insertion order reverses the iteration order' );
 
     # The keys are the actual key bytes: "hi" starts with 'h' (104).
-    answers( 'my %h; %h{"hi"}=1; for my $k (keys %h) { return Brocken::load_i8( Brocken::Runtime::unbox_ptr($k) ); } return 0;',
+    answers( 'my %h; %h{"hi"}=1; for my $k (keys %h) { exit Brocken::load_i8( Brocken::Runtime::unbox_ptr($k) ); } exit 0;',
         104, 'a key box holds the key string' );
 };
 subtest 'values yields the stored values in insertion order' => sub {
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; my i64 $t=0; for my $v (values %h) { $t = $t*10 + $v; } return $t;',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; my i64 $t=0; for my $v (values %h) { $t = $t*10 + $v; } exit $t;',
         123, 'values follow insertion order' );
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"a"}=9; my i64 $t=0; for my $v (values %h) { $t = $t*10 + $v; } return $t;',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"a"}=9; my i64 $t=0; for my $v (values %h) { $t = $t*10 + $v; } exit $t;',
         92, 'an overwrite keeps the key in place but reports the new value' );
 };
 subtest 're-assigning a key keeps its position' => sub {
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; %h{"b"}=9; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } return $t;',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; %h{"b"}=9; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } exit $t;',
         193, 'the second key still iterates second' );
 };
 subtest 'deleting a key unlinks it from the order' => sub {
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"a"}; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } return $t;',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"a"}; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } exit $t;',
         23, 'removing the head leaves the rest in order' );
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"b"}; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } return $t;',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"b"}; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } exit $t;',
         13, 'removing an interior key links its neighbours' );
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"c"}; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } return $t;',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"c"}; my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } exit $t;',
         12, 'removing the tail moves the tail back' );
-    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"a"}; my i64 $n=0; for my $k (keys %h) { $n=$n+1; } return $n;',
+    answers( 'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"a"}; my i64 $n=0; for my $k (keys %h) { $n=$n+1; } exit $n;',
         2, 'a deleted key is not counted' );
 };
 subtest 'a key inserted after a delete goes to the tail' => sub {
     answers(
         'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"b"}; %h{"d"}=4;' .
-            ' my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } return $t;',
+            ' my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } exit $t;',
         134,
         'the new key iterates last, after the surviving a and c'
     );
 };
 subtest 'an empty hash yields an empty list' => sub {
-    answers( 'my %h; my i64 $t=7; for my $k (keys %h) { $t=1; } return $t;',   7, 'keys of an empty hash never iterates' );
-    answers( 'my %h; my i64 $t=7; for my $v (values %h) { $t=1; } return $t;', 7, 'values of an empty hash never iterates' );
+    answers( 'my %h; my i64 $t=7; for my $k (keys %h) { $t=1; } exit $t;',   7, 'keys of an empty hash never iterates' );
+    answers( 'my %h; my i64 $t=7; for my $v (values %h) { $t=1; } exit $t;', 7, 'values of an empty hash never iterates' );
 };
 subtest 'insertion order survives a rehash' => sub {
 
@@ -64,25 +64,25 @@ subtest 'insertion order survives a rehash' => sub {
     my $src   = 'my %h;' . join( '', map { qq{ %h{"$names[$_]"}=} . ( $_ + 1 ) . ';' } 0 .. 11 );
     my $t     = 0;
     $t = ( $t * 2 + ( $_ + 1 ) ) % 256 for 0 .. 11;
-    answers( $src . ' my i64 $t=0; for my $k (keys %h) { $t = ($t*2 + %h{$k}) % 256; } return $t;',
+    answers( $src . ' my i64 $t=0; for my $k (keys %h) { $t = ($t*2 + %h{$k}) % 256; } exit $t;',
         $t, "the order answerssum is $t after two rehashes" );
 
     # Every entry is still present: the plain sum of the values 1..12 is 78.
-    answers( $src . ' my i64 $s=0; for my $v (values %h) { $s = $s + $v; } return $s;', 78, 'values still sum to 78 after growing' );
+    answers( $src . ' my i64 $s=0; for my $v (values %h) { $s = $s + $v; } exit $s;', 78, 'values still sum to 78 after growing' );
 };
 subtest 'a keys/values list destructures in order' => sub {
-    answers( 'my %h; %h{"a"}=10; %h{"b"}=20; my (Any $x, Any $y) = values %h; return $x*10 + $y;',
+    answers( 'my %h; %h{"a"}=10; %h{"b"}=20; my (Any $x, Any $y) = values %h; exit $x*10 + $y;',
         120, 'values destructure into the declared slots in order' );
-    answers( 'my %h; %h{"hi"}=1; my (String $k) = keys %h; return Brocken::load_i8($k);', 104, 'a keys element destructures into a String slot' );
+    answers( 'my %h; %h{"hi"}=1; my (String $k) = keys %h; exit Brocken::load_i8($k);', 104, 'a keys element destructures into a String slot' );
 };
 subtest 'values returns an owning snapshot of each stored box' => sub {
 
     # `values` takes a reference for the list it builds, so overwriting the table afterwards leaves the snapshot holding
     # the original box rather than a freed one.
-    answers( 'my %h; %h{"a"}=42; my (Any $v) = values %h; %h{"a"}=7; return $v;', 42, 'the captured value survives the table overwriting it' );
+    answers( 'my %h; %h{"a"}=42; my (Any $v) = values %h; %h{"a"}=7; exit $v;', 42, 'the captured value survives the table overwriting it' );
 };
 subtest 'a bare keys/values statement is allowed' => sub {
-    answers( 'my %h; %h{"a"}=1; keys %h; values %h; return 7;', 7, 'discarding the list is harmless' );
+    answers( 'my %h; %h{"a"}=1; keys %h; values %h; exit 7;', 7, 'discarding the list is harmless' );
 };
 subtest 'keys/values parse as Expr::HashKeys over a hash variable' => sub {
     my $c    = Brocken->new;

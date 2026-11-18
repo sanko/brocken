@@ -24,7 +24,7 @@ class Point {
 my u128 $v2 = 11671637082321175394;
 my ptr $obj1 = Point->new(f1 => -63);
 $obj1->set_f1($v2);
-return $obj1->f1();
+exit $obj1->f1();
 BROCKEN
 subtest 'the masking and is typed at the destination width' => sub {
     my $module = Brocken->new->compile($src);

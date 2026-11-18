@@ -31,7 +31,7 @@ class P {
     field i64 $b :param :reader;
 }
 my ptr $p = P->new(a => 1, b => 2);
-return $p->b();
+exit $p->b();
 BROCKEN
     my $st = find_struct_type( $mod, 'P' );
     ok( $st, 'found the struct type for P' );
@@ -47,7 +47,7 @@ class Q {
     field i8 $b :param :reader;
 }
 my ptr $q = Q->new(a => 1, b => 2);
-return $q->b();
+exit $q->b();
 BROCKEN
     my $st = find_struct_type( $mod, 'Q' );
     ok( $st, 'found the struct type for Q' );
@@ -63,7 +63,7 @@ class R {
     field i64 $b :param :reader;
 }
 my ptr $r = R->new(a => 1, b => 2);
-return $r->b();
+exit $r->b();
 BROCKEN
     my $st = find_struct_type( $mod, 'R' );
     ok( $st, 'found the struct type for R' );
@@ -81,7 +81,7 @@ subtest 'mixed-width fields read back correctly' => sub {
             ' field i64 $b :param :reader;' .
             ' field i32 $c :param :reader; }' .
             ' my ptr $m = M->new(a => 3, b => 40, c => -1);' .
-            ' return $m->a() + $m->b() + $m->c();',
+            ' exit $m->a() + $m->b() + $m->c();',
         42,
         'i8/i64/i32 fields round-trip through the aligned layout',
         targets => [@native]

@@ -34,8 +34,8 @@ sub wrap {
         $body . "\n" .
         "my i64 \$after = Brocken::Runtime::free16_count(\$hb);\n" .
         "my i64 \$diff = Brocken::i64_sub(\$after, \$before);\n" .
-        "if (\$diff != $want) { return 9; }\n" .
-        "return 0;\n";
+        "if (\$diff != $want) { exit 9; }\n" .
+        "exit 0;\n";
 }
 subtest 'a returned local is owned once by the caller' => sub {
     run_case( wrap( 'sub mk() :returns(Any) { my $u = 7; return $u; }', '{ my Any $a = mk(); }', 1 ),
@@ -57,7 +57,7 @@ subtest '//= with an owned call result on a borrowed parameter balances' => sub 
     run_case(
         wrap(
             'sub mk() :returns(Any) { my $u = 42; return $u; }' . ' sub fill(Any $x) :returns(i64) { $x //= mk(); my i64 $v = $x; return $v; }',
-            'my Any $z; my i64 $r = fill($z); if ($r != 42) { return 8; }', 1
+            'my Any $z; my i64 $r = fill($z); if ($r != 42) { exit 8; }', 1
         ),
         0,
         'the stored call result is released once at callee exit'

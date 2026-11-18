@@ -562,17 +562,30 @@ class Brocken::Katsuro::Parser v0.0.1 {
     method parse_exit() {
         my $exit_token = $self->advance();
         my $code       = undef;
-        if ( $self->check('(') ) {
-            $self->advance();
-            $code = $self->parse_expression(0) unless $self->check(')');
-            $self->consume(')');
-        }
-        elsif ( !$self->check(';') &&
-            !$self->check('}')               &&
-            !$self->check('EOF')             &&
-            !$self->check( 'KEYWORD', 'if' ) &&
-            !$self->check( 'KEYWORD', 'unless' ) ) {
-            $code = $self->parse_expression(0);
+
+        # A bare `exit` may be followed by `;`, the end of the block, or a postfix `if`/`unless` modifier
+        # (`exit if $bad`); in all of those there is no status to parse.
+        unless ( $self->check(';') ||
+            $self->check('}')               ||
+            $self->check('EOF')             ||
+            $self->check( 'KEYWORD', 'if' ) ||
+            $self->check( 'KEYWORD', 'unless' ) ) {
+
+            # `exit()` is the explicit empty status -- the same as a bare `exit`. Without this the `()` would fall
+            # through to the parenthesised-expression path and fold to `Const Int 0`.
+            if ( $self->check('(') && ( $tokens->[ $pos + 1 ] // {} )->{type} eq ')' ) {
+                $self->advance();
+                $self->advance();
+            }
+            else {
+                $code = $self->parse_expression(0);
+
+                # `exit(EXPR)` is the Perl-style spelling of `exit EXPR`; a top-level parenthesised expression is
+                # unwrapped so both spellings produce the same AST, and so `exit (A) ? B : C` parses as `exit A ? B : C`.
+                if ( $code->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
+                    $code = $code->expr;
+                }
+            }
         }
         return $self->_end_statement( Brocken::Katsuro::AST::Stmt::Exit->new( $self->_pos_token($exit_token), code => $code ),
             "Expected ';' after exit" );

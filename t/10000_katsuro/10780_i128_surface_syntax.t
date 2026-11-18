@@ -30,13 +30,13 @@ subtest 'the 128-bit names are feature-gated' => sub {
 subtest 'an i128 survives a declare/widen/narrow round trip' => sub {
     my $brocken = Brocken->new;
     unless ( $brocken->platform->is_native ) { plan skip_all => 'not native'; return }
-    answers( $brocken, "use feature 'brocken_native_types';" . ' my i128 $x = 3; my i64 $j = $x; return $j == 3 ? 1 : 0;',
+    answers( $brocken, "use feature 'brocken_native_types';" . ' my i128 $x = 3; my i64 $j = $x; exit $j == 3 ? 1 : 0;',
         1, 'an i128 literal narrows to i64' );
-    answers( $brocken, "use feature 'brocken_native_types';" . ' my i64 $a = 5; my i128 $b = $a; my i64 $j = $b; return $j == 5 ? 1 : 0;',
+    answers( $brocken, "use feature 'brocken_native_types';" . ' my i64 $a = 5; my i128 $b = $a; my i64 $j = $b; exit $j == 5 ? 1 : 0;',
         1, 'an i64 widens to i128 and back' );
-    answers( $brocken, "use feature 'brocken_native_types';" . ' my i128 $x = -3; my i64 $j = $x; return $j == -3 ? 1 : 0;',
+    answers( $brocken, "use feature 'brocken_native_types';" . ' my i128 $x = -3; my i64 $j = $x; exit $j == -3 ? 1 : 0;',
         1, 'a negative i128 narrows to i64' );
-    answers( $brocken, "use feature 'brocken_native_types';" . ' my i128 $x = 3; my i128 $y = $x + 4; my i64 $j = $y; return $j == 7 ? 1 : 0;',
+    answers( $brocken, "use feature 'brocken_native_types';" . ' my i128 $x = 3; my i128 $y = $x + 4; my i64 $j = $y; exit $j == 7 ? 1 : 0;',
         1, 'i128 arithmetic narrows to i64' );
 };
 done_testing;

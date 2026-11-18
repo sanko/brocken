@@ -27,24 +27,24 @@ sub compiles_to ( $src, $want, $name ) {
 subtest 'comparison against an out-of-range literal' => sub {
 
     # The boundary: signed 32 bits reaches 2147483647 and no further.
-    compiles_to( 'my i64 $x = 2147483647; return $x == 2147483647 ? 1 : 0;', 1, 'imm within signed 32 bits still compares' );
-    compiles_to( 'my i64 $x = 2147483648; return $x == 2147483648 ? 1 : 0;', 1, 'imm at 2^31 compares' );
-    compiles_to( 'my i64 $x = 4294967296; return $x == 4294967296 ? 1 : 0;', 1, 'imm at 2^32 compares' );
-    compiles_to( 'my i64 $x = 5; return $x == 4294967296 ? 1 : 0;',          0, 'a small value does not equal 2^32' );
+    compiles_to( 'my i64 $x = 2147483647; exit $x == 2147483647 ? 1 : 0;', 1, 'imm within signed 32 bits still compares' );
+    compiles_to( 'my i64 $x = 2147483648; exit $x == 2147483648 ? 1 : 0;', 1, 'imm at 2^31 compares' );
+    compiles_to( 'my i64 $x = 4294967296; exit $x == 4294967296 ? 1 : 0;', 1, 'imm at 2^32 compares' );
+    compiles_to( 'my i64 $x = 5; exit $x == 4294967296 ? 1 : 0;',          0, 'a small value does not equal 2^32' );
 };
 subtest 'arithmetic with an out-of-range literal' => sub {
 
     # `$x >> 32` keeps the answer under 2^31 so the check is the arithmetic,
     # not another large-immediate compare.
-    compiles_to( 'my i64 $x = 1; $x = $x + 4294967296; return $x >> 32;',    1, 'add of 2^32 keeps its value' );
-    compiles_to( 'my i64 $x = 4294967297; $x = $x - 4294967296; return $x;', 1, 'sub of 2^32 keeps its value' );
-    compiles_to( 'my i64 $x = 3; $x = $x * 4294967296; return $x >> 32;',    3, 'mul by 2^32 keeps its value' );
+    compiles_to( 'my i64 $x = 1; $x = $x + 4294967296; exit $x >> 32;',    1, 'add of 2^32 keeps its value' );
+    compiles_to( 'my i64 $x = 4294967297; $x = $x - 4294967296; exit $x;', 1, 'sub of 2^32 keeps its value' );
+    compiles_to( 'my i64 $x = 3; $x = $x * 4294967296; exit $x >> 32;',    3, 'mul by 2^32 keeps its value' );
 
     # A 64-bit AND mask whose low 32 bits are zero is sign-extended to all ones by the imm32 form, which would clear
     # every bit instead of the low ones.
-    compiles_to( 'my i64 $x = 4294967297; $x = $x & 4294967296; return $x >> 32;', 1, 'and with a 2^32 mask keeps the high bit' );
+    compiles_to( 'my i64 $x = 4294967297; $x = $x & 4294967296; exit $x >> 32;', 1, 'and with a 2^32 mask keeps the high bit' );
 
     # Negative values outside signed 32 bits take the same path.
-    compiles_to( 'my i64 $x = 0; $x = $x - 4294967296; return $x == -4294967296 ? 1 : 0;', 1, 'negative out-of-range imm compares' );
+    compiles_to( 'my i64 $x = 0; $x = $x - 4294967296; exit $x == -4294967296 ? 1 : 0;', 1, 'negative out-of-range imm compares' );
 };
 done_testing;

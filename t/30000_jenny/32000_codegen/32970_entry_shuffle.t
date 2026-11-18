@@ -47,8 +47,8 @@ SKIP: {
         $total += $_ for @args;
         my $free = <<"BROCKEN";
 sub f( @{[ join ', ', @params ]} ) :returns(i64) { return $sum; }
-if ( f( @{[ join ', ', @args ]} ) == $total ) { return 42; }
-return 1;
+if ( f( @{[ join ', ', @args ]} ) == $total ) { exit 42; }
+exit 1;
 BROCKEN
         is( run($free), 42, "native: free function with $n argument(s), all in registers" );
     }
@@ -103,8 +103,8 @@ sub g( $params ) :returns(i64) {
     my i64 \$j = \$s;
     return \$j;
 }
-if ( g( $call ) == $sum ) { return 42; }
-return 1;
+if ( g( $call ) == $sum ) { exit 42; }
+exit 1;
 BROCKEN
         my $module = $cross->compile($src);
         my $funcs  = $cross->codegen->emit_functions( $module->functions );

@@ -57,7 +57,7 @@ sub memory_covers_heap ($name) {
 
     # The instance's own linker already carries the rodata `compile` interned (the runtime's strings), so a bare
     # `Linker::Wasm->new` would fail to resolve them.
-    my $module = $brocken->compile('return 42;');
+    my $module = $brocken->compile('exit 42;');
     $brocken->linker->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
     my $bytes = do { open my $fh, '<:raw', $file or die $!; local $/; <$fh> };
     unlink $file if -e $file;
@@ -96,30 +96,30 @@ sub _uleb ( $bytes, $pos ) {
 SKIP: {
     skip 'Neither wasmtime nor node are installed', 1 unless $runner;
     subtest 'a single untyped variable' => sub {
-        answers( 'return 42;',                             42, 'the simplest program runs' );
-        answers( 'my $x = 42; return 42;',                 42, 'a boxed variable is never read' );
-        answers( 'my $x = 42; return $x;',                 42, 'a boxed 64-bit value reads back whole' );
-        answers( 'my $x = 42; my i64 $y = $x; return $y;', 42, 'a boxed value widens to i64' );
+        answers( 'exit 42;',                             42, 'the simplest program runs' );
+        answers( 'my $x = 42; exit 42;',                 42, 'a boxed variable is never read' );
+        answers( 'my $x = 42; exit $x;',                 42, 'a boxed 64-bit value reads back whole' );
+        answers( 'my $x = 42; my i64 $y = $x; exit $y;', 42, 'a boxed value widens to i64' );
     };
     subtest 'two or more untyped variables allocate' => sub {
 
         # Each of these needs a second heap allocation. One fit inside the page
         # that was really reserved; the second did not.
-        answers( 'my $a = 3; my $b = 4; return $a + $b;', 7,  'two untyped variables add' );
-        answers( 'my $a = 3; my $b = 4; return $a;',      3,  'the first of two reads back' );
-        answers( 'my $a = 3; my $b = 4; return $b;',      4,  'the second of two reads back' );
-        answers( 'my $a = 3; my $b = 4; return 42;',      42, 'two untyped variables, neither read' );
+        answers( 'my $a = 3; my $b = 4; exit $a + $b;', 7,  'two untyped variables add' );
+        answers( 'my $a = 3; my $b = 4; exit $a;',      3,  'the first of two reads back' );
+        answers( 'my $a = 3; my $b = 4; exit $b;',      4,  'the second of two reads back' );
+        answers( 'my $a = 3; my $b = 4; exit 42;',      42, 'two untyped variables, neither read' );
     };
     subtest 'many untyped variables' => sub {
         for my $n ( 1 .. 6 ) {
             my $decls = join ' ',   map {"my \$v$_ = 1;"} 1 .. $n;
             my $sum   = join ' + ', map {"\$v$_"} 1 .. $n;
-            answers( "$decls return $sum;", $n, "$n untyped variables sum to $n" );
+            answers( "$decls exit $sum;", $n, "$n untyped variables sum to $n" );
         }
     };
     subtest 'untyped and typed variables mix' => sub {
-        answers( 'my $a = 3; my i64 $b = 7; return $a + $b;', 10, 'untyped then typed' );
-        answers( 'my i64 $a = 3; my $b = 1; return $a + $b;', 4,  'typed then untyped' );
+        answers( 'my $a = 3; my i64 $b = 7; exit $a + $b;', 10, 'untyped then typed' );
+        answers( 'my i64 $a = 3; my $b = 1; exit $a + $b;', 4,  'typed then untyped' );
     };
 
     # Assigning one box to another used to trap: the store increfs the box it is about to replace and decrefs the old
@@ -127,21 +127,21 @@ SKIP: {
     # disagreed about a block that was still live and the free list handed it out again. These are the shapes TODO.md
     # recorded as still trapping.
     subtest 'assignment between untyped variables' => sub {
-        answers( 'my $a = 3; my $b = 4; $b = $b; return $a;',                               3, 'self-assignment leaves the other value' );
-        answers( 'my $a = 1; $a = $a; $a = $a; return $a;',                                 1, 'repeated self-assignment' );
-        answers( 'my $a = 3; my $b = 4; $b = $a; return $b;',                               3, 'one untyped variable assigned from another' );
-        answers( 'my $x = 3; my $y = $x; return $y;',                                       3, 'initialising one box from another' );
-        answers( 'my $a = 1; my $b = 2; my $c = 3; $c = $a; return $c;',                    1, 'assignment into a third box' );
-        answers( 'my $a = 1; my $b = 2; my $c = 3; $a = $b; $b = $c; return $a + $b + $c;', 8, 'a chain of moves' );
-        answers( 'my $x = 2.5; my $y = $x; return $y == 2.5 ? 1 : 0;',                      1, 'a float box copied between variables' );
+        answers( 'my $a = 3; my $b = 4; $b = $b; exit $a;',                               3, 'self-assignment leaves the other value' );
+        answers( 'my $a = 1; $a = $a; $a = $a; exit $a;',                                 1, 'repeated self-assignment' );
+        answers( 'my $a = 3; my $b = 4; $b = $a; exit $b;',                               3, 'one untyped variable assigned from another' );
+        answers( 'my $x = 3; my $y = $x; exit $y;',                                       3, 'initialising one box from another' );
+        answers( 'my $a = 1; my $b = 2; my $c = 3; $c = $a; exit $c;',                    1, 'assignment into a third box' );
+        answers( 'my $a = 1; my $b = 2; my $c = 3; $a = $b; $b = $c; exit $a + $b + $c;', 8, 'a chain of moves' );
+        answers( 'my $x = 2.5; my $y = $x; exit $y == 2.5 ? 1 : 0;',                      1, 'a float box copied between variables' );
     };
     subtest 'the payload is stored at the width of the value' => sub {
-        answers( 'my $x = 42; return $x + 1;',             43, 'an i64 payload is 8 bytes wide' );
-        answers( 'my $x = 0; my $y = 42; return $y - $x;', 42, 'subtraction through two boxes' );
+        answers( 'my $x = 42; exit $x + 1;',             43, 'an i64 payload is 8 bytes wide' );
+        answers( 'my $x = 0; my $y = 42; exit $y - $x;', 42, 'subtraction through two boxes' );
 
         # A 64-bit value that does not fit in the low half, which is what a
         # 4-byte store would have truncated to zero.
-        answers( 'my $x = 4294967296; return $x >> 32;', 1, 'a payload above 32 bits survives' );
+        answers( 'my $x = 4294967296; exit $x >> 32;', 1, 'a payload above 32 bits survives' );
     };
 
     # Returning a boxed value transfers ownership to the caller, so the box has to outlive the callee's own locals. The
@@ -151,19 +151,19 @@ SKIP: {
     # the same programs returned 0 on native -- and it is why every returned list element looked like a freed pointer
     # even after the frame region was separated from the arena.
     subtest 'a box returned from a function survives the callee' => sub {
-        answers( 'sub mk() :returns(Any) { my $u = 7; return $u; } my $a = mk(); return $a + 1;', 8, 'return a local, use it in the caller' );
-        answers( 'sub mk() :returns(Any) { my $u = 7; my $v = 9; return $u + $v; } my $a = mk(); return $a - 6;',
+        answers( 'sub mk() :returns(Any) { my $u = 7; return $u; } my $a = mk(); exit $a + 1;', 8, 'return a local, use it in the caller' );
+        answers( 'sub mk() :returns(Any) { my $u = 7; my $v = 9; return $u + $v; } my $a = mk(); exit $a - 6;',
             10, 'the returned box holds a computed value' );
-        answers( 'sub id(Any $v) :returns(Any) { return $v; } my $x = 5; return id($x);', 5, 'a box passed through an Any parameter' );
-        answers( 'sub mk() :returns(Any) { my $u = 3; return $u; } my $a = mk(); my $b = mk(); return $a + $b;',
+        answers( 'sub id(Any $v) :returns(Any) { return $v; } my $x = 5; exit id($x);', 5, 'a box passed through an Any parameter' );
+        answers( 'sub mk() :returns(Any) { my $u = 3; return $u; } my $a = mk(); my $b = mk(); exit $a + $b;',
             6, 'two Any returns do not free each other' );
-        answers( 'sub mk() :returns(ptr) { my $u = 7; return ($u, 2); } my ($a, $b) = mk(); return $a + $b;',
+        answers( 'sub mk() :returns(ptr) { my $u = 7; return ($u, 2); } my ($a, $b) = mk(); exit $a + $b;',
             9, 'an untyped list element survives its maker' );
     };
     subtest 'the generated modules validate' => sub {
-        validates( 'my $x = 42; return $x;',                'one untyped variable validates' );
-        validates( 'my $a = 3; my $b = 4; return $a + $b;', 'two untyped variables validate' );
-        validates( 'my $x = 4294967296; return $x >> 32;',  'a wide untyped value validates' );
+        validates( 'my $x = 42; exit $x;',                'one untyped variable validates' );
+        validates( 'my $a = 3; my $b = 4; exit $a + $b;', 'two untyped variables validate' );
+        validates( 'my $x = 4294967296; exit $x >> 32;',  'a wide untyped value validates' );
     };
     subtest 'the declared memory covers the promised heap' => sub {
         memory_covers_heap('the memory section reserves the whole heap');

@@ -15,50 +15,50 @@ sub answers ( $source, $want, $label ) {
     Test2::Tools::Brocken::answers( $source, $want, $label, targets => [@native_targets] );
 }
 subtest 'ceil rounds toward positive infinity' => sub {
-    answers( 'sub f() :returns(i64) { if (builtin::ceil(2.5) == 3) { return 1; } return 0; } return f();',   1, 'ceil(2.5) is 3' );
-    answers( 'sub f() :returns(i64) { if (builtin::ceil(-2.5) == -2) { return 1; } return 0; } return f();', 1, 'ceil(-2.5) is -2' );
-    answers( 'sub f() :returns(i64) { if (builtin::ceil(3.0) == 3) { return 1; } return 0; } return f();', 1, 'ceil of an integral float is itself' );
+    answers( 'sub f() :returns(i64) { if (builtin::ceil(2.5) == 3) { return 1; } return 0; } exit f();',   1, 'ceil(2.5) is 3' );
+    answers( 'sub f() :returns(i64) { if (builtin::ceil(-2.5) == -2) { return 1; } return 0; } exit f();', 1, 'ceil(-2.5) is -2' );
+    answers( 'sub f() :returns(i64) { if (builtin::ceil(3.0) == 3) { return 1; } return 0; } exit f();', 1, 'ceil of an integral float is itself' );
 };
 subtest 'floor rounds toward negative infinity' => sub {
-    answers( 'sub f() :returns(i64) { if (builtin::floor(2.5) == 2) { return 1; } return 0; } return f();',   1, 'floor(2.5) is 2' );
-    answers( 'sub f() :returns(i64) { if (builtin::floor(-2.5) == -3) { return 1; } return 0; } return f();', 1, 'floor(-2.5) is -3' );
-    answers( 'sub f() :returns(i64) { if (builtin::floor(3.0) == 3) { return 1; } return 0; } return f();',
+    answers( 'sub f() :returns(i64) { if (builtin::floor(2.5) == 2) { return 1; } return 0; } exit f();',   1, 'floor(2.5) is 2' );
+    answers( 'sub f() :returns(i64) { if (builtin::floor(-2.5) == -3) { return 1; } return 0; } exit f();', 1, 'floor(-2.5) is -3' );
+    answers( 'sub f() :returns(i64) { if (builtin::floor(3.0) == 3) { return 1; } return 0; } exit f();',
         1, 'floor of an integral float is itself' );
 };
 subtest 'rounding an integer is the identity' => sub {
-    answers( 'sub f() :returns(i64) { return builtin::ceil(7); } return f();',  7, 'ceil of an int' );
-    answers( 'sub f() :returns(i64) { return builtin::floor(7); } return f();', 7, 'floor of an int' );
+    answers( 'sub f() :returns(i64) { return builtin::ceil(7); } exit f();',  7, 'ceil of an int' );
+    answers( 'sub f() :returns(i64) { return builtin::floor(7); } exit f();', 7, 'floor of an int' );
 };
 subtest 'rounding a boxed number reads its tag' => sub {
 
     # A float box rounds; an int box is returned untouched (it never goes through the float conversion, which would
     # lose bits beyond 2^53).
-    answers( 'sub f() :returns(i64) { my Any $x = 2.5; return builtin::ceil($x); } return f();',  3, 'a boxed float ceils' );
-    answers( 'sub f() :returns(i64) { my Any $x = 2.5; return builtin::floor($x); } return f();', 2, 'a boxed float floors' );
-    answers( 'sub f() :returns(i64) { my Any $x = 7; return builtin::floor($x); } return f();',   7, 'a boxed int passes through' );
+    answers( 'sub f() :returns(i64) { my Any $x = 2.5; return builtin::ceil($x); } exit f();',  3, 'a boxed float ceils' );
+    answers( 'sub f() :returns(i64) { my Any $x = 2.5; return builtin::floor($x); } exit f();', 2, 'a boxed float floors' );
+    answers( 'sub f() :returns(i64) { my Any $x = 7; return builtin::floor($x); } exit f();',   7, 'a boxed int passes through' );
 };
 subtest 'inf is the floating-point infinity' => sub {
-    answers( 'sub f() :returns(i64) { if (builtin::inf() > 1000000.0) { return 1; } return 0; } return f();',  1, 'inf() is large' );
-    answers( 'sub f() :returns(i64) { if (builtin::inf(1) > 1000000.0) { return 1; } return 0; } return f();', 1, 'inf(1) is positive' );
-    answers( 'sub f() :returns(i64) { if (builtin::inf(-1) < 0.0) { return 1; } return 0; } return f();',      1, 'inf(-1) is negative' );
+    answers( 'sub f() :returns(i64) { if (builtin::inf() > 1000000.0) { return 1; } return 0; } exit f();',  1, 'inf() is large' );
+    answers( 'sub f() :returns(i64) { if (builtin::inf(1) > 1000000.0) { return 1; } return 0; } exit f();', 1, 'inf(1) is positive' );
+    answers( 'sub f() :returns(i64) { if (builtin::inf(-1) < 0.0) { return 1; } return 0; } exit f();',      1, 'inf(-1) is negative' );
 };
 subtest 'nan is never equal to itself' => sub {
-    answers( 'sub f() :returns(i64) { if (builtin::nan() != builtin::nan()) { return 1; } return 0; } return f();', 1, 'nan() != nan()' );
-    answers( 'sub f() :returns(i64) { if (builtin::nan() == builtin::nan()) { return 1; } return 0; } return f();', 0, 'nan() == nan() is false' );
+    answers( 'sub f() :returns(i64) { if (builtin::nan() != builtin::nan()) { return 1; } return 0; } exit f();', 1, 'nan() != nan()' );
+    answers( 'sub f() :returns(i64) { if (builtin::nan() == builtin::nan()) { return 1; } return 0; } exit f();', 0, 'nan() == nan() is false' );
 };
 subtest 'trim strips leading and trailing whitespace' => sub {
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("  hi  "); return length($s); } return f();', 2, 'both ends' );
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("hi"); return length($s); } return f();',     2, 'nothing to strip' );
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("   "); return length($s); } return f();',    0, 'all whitespace is empty' );
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim(""); return length($s); } return f();',       0, 'the empty string stays empty' );
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("\t x \n"); return length($s); } return f();',
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("  hi  "); return length($s); } exit f();', 2, 'both ends' );
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("hi"); return length($s); } exit f();',     2, 'nothing to strip' );
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("   "); return length($s); } exit f();',    0, 'all whitespace is empty' );
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim(""); return length($s); } exit f();',       0, 'the empty string stays empty' );
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("\t x \n"); return length($s); } exit f();',
         1, 'tab and newline are whitespace' );
 
     # The surfaces prove the boundary; this proves the interior survived untouched.
-    answers( 'sub f() :returns(i64) { if (builtin::trim("  hi  ") eq "hi") { return 1; } return 0; } return f();', 1, 'content preserved' );
+    answers( 'sub f() :returns(i64) { if (builtin::trim("  hi  ") eq "hi") { return 1; } return 0; } exit f();', 1, 'content preserved' );
 };
 subtest 'trim reads a boxed string' => sub {
-    answers( 'sub f() :returns(i64) { my Any $d = "  yo  "; my String $s = builtin::trim($d); return length($s); } return f();',
+    answers( 'sub f() :returns(i64) { my Any $d = "  yo  "; my String $s = builtin::trim($d); return length($s); } exit f();',
         2, 'a boxed string trims' );
 };
 #

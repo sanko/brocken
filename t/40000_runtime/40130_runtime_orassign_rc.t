@@ -19,7 +19,7 @@ subtest 'a //= into a dynamic field keeps the assigned box alive' => sub {
             ' my ptr $h = Holder->new();' .
             '{ my $tmp = 123; $h->put($tmp); }' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         123,
         'the field owns the box after the caller block exits',
         targets => [@native]
@@ -33,7 +33,7 @@ subtest 'a ||= into a dynamic field keeps the assigned box alive' => sub {
             ' my ptr $h = Holder->new();' .
             '{ my $tmp = 77; $h->put($tmp); }' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         77,
         'the field owns the box after the caller block exits',
         targets => [@native]
@@ -47,7 +47,7 @@ subtest 'a //= through a field access keeps the assigned box alive' => sub {
             ' my ptr $h = Holder->new();' .
             '{ my $tmp = 210; $h->put($tmp); }' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         210,
         'the field-access store also owns the box',
         targets => [@native]
@@ -60,7 +60,7 @@ subtest 'a ||= default owns the box it substitutes for a supplied null' => sub {
             ' my Any $z;' .
             ' my ptr $h = Holder->new(v => $z);' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         91,
         'the default is stored and owned when the supplied value is null',
         targets => [@native]
@@ -75,7 +75,7 @@ subtest 'a //= on a present slot keeps the existing box' => sub {
             ' my $src = 8;' .
             ' $h->put($src);' .
             ' my i64 $n = $h->get();' .
-            ' return $n;',
+            ' exit $n;',
         5,
         'an absent test that is false leaves the slot untouched',
         targets => [@native]

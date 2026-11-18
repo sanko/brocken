@@ -46,7 +46,7 @@ SKIP: {
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
         $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 31 ) );
-        run_check( 'return 31', 31, $func );
+        run_check( 'exit 31', 31, $func );
     };
 
     # f64 constant via alloca load + fptosi (tests fload + fcvtzs)

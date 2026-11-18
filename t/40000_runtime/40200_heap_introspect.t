@@ -25,20 +25,20 @@ my i64 $fb = Brocken::Runtime::free_blocks_count($hb);
     my ptr $base = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
     my ptr $line0 = Brocken::ptr_add($base, 32);
     # hc should be line0
-    if (Brocken::ptr_cmp_eq($hc, $line0) == 0) { return 1; }
+    if (Brocken::ptr_cmp_eq($hc, $line0) == 0) { exit 1; }
     # ic should also be line0
-    if (Brocken::ptr_cmp_eq($ic, $line0) == 0) { return 2; }
+    if (Brocken::ptr_cmp_eq($ic, $line0) == 0) { exit 2; }
     # il should be base + 256
-    if (Brocken::ptr_cmp_eq($il, Brocken::ptr_add($base, 256)) == 0) { return 3; }
+    if (Brocken::ptr_cmp_eq($il, Brocken::ptr_add($base, 256)) == 0) { exit 3; }
     # line_remaining = 256 - 32 = 224
-    if ($lr != 224) { return 4; }
+    if ($lr != 224) { exit 4; }
     # block_remaining = 32752 - 32 = 32720 (last 16 bytes are metadata)
-    if ($br != 32720) { return 5; }
+    if ($br != 32720) { exit 5; }
 # free16_count == 0
-if ($f16 != 0) { return 6; }
+if ($f16 != 0) { exit 6; }
 # free_blocks_count == 0
-if ($fb != 0) { return 7; }
-return 0;
+if ($fb != 0) { exit 7; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_intro_init' . $brocken->ext;
@@ -63,11 +63,11 @@ my ptr $after = Brocken::Runtime::immix_cursor($hb);
 my i64 $after_lr = Brocken::Runtime::line_remaining($hb);
 my ptr $expected_after = Brocken::ptr_add($before, 16);
 # cursor advanced by 16
-if (Brocken::ptr_cmp_eq($after, $expected_after) == 0) { return 1; }
+if (Brocken::ptr_cmp_eq($after, $expected_after) == 0) { exit 1; }
 # line_remaining decreased by 16
 my i64 $expected_lr = Brocken::i64_sub($before_lr, 16);
-if ($after_lr != $expected_lr) { return 2; }
-return 0;
+if ($after_lr != $expected_lr) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_intro_alloc1' . $brocken->ext;
@@ -91,8 +91,8 @@ my $y = 20;
 my $z = 30;
 my ptr $after = Brocken::Runtime::immix_cursor($hb);
 my ptr $expected = Brocken::ptr_add($before, 48);
-if (Brocken::ptr_cmp_eq($after, $expected) == 0) { return 1; }
-return 0;
+if (Brocken::ptr_cmp_eq($after, $expected) == 0) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_intro_alloc3' . $brocken->ext;
@@ -112,8 +112,8 @@ my ptr $hb = Brocken::heap_base();
 my ptr $hc = Brocken::Runtime::heap_cursor($hb);
 my ptr $ic = Brocken::Runtime::immix_cursor($hb);
 # heap_cursor (legacy) should equal immix_cursor initially
-if (Brocken::ptr_cmp_eq($hc, $ic) == 0) { return 1; }
-return 0;
+if (Brocken::ptr_cmp_eq($hc, $ic) == 0) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_intro_equal' . $brocken->ext;
@@ -135,16 +135,16 @@ my i64 $br1 = Brocken::Runtime::block_remaining($hb);
 my $x = 42;
 my i64 $br2 = Brocken::Runtime::block_remaining($hb);
 my i64 $expected_br2 = Brocken::i64_sub($br1, 16);
-if ($br2 != $expected_br2) { return 1; }
+if ($br2 != $expected_br2) { exit 1; }
 # After second allocation, decreases by another 16
 my $y = 99;
 my i64 $br3 = Brocken::Runtime::block_remaining($hb);
 my i64 $expected_br3 = Brocken::i64_sub($expected_br2, 16);
-if ($br3 != $expected_br3) { return 2; }
+if ($br3 != $expected_br3) { exit 2; }
 # Verify live_count matches allocation count
 my i64 $lc = Brocken::Runtime::live_count($hb);
-if ($lc != 2) { return 3; }
-return 0;
+if ($lc != 2) { exit 3; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_intro_blockrem' . $brocken->ext;
@@ -167,9 +167,9 @@ my $z = 100;
 # No objects have been freed yet
 my i64 $f16 = Brocken::Runtime::free16_count($hb);
 my i64 $fb = Brocken::Runtime::free_blocks_count($hb);
-if ($f16 != 0) { return 1; }
-if ($fb != 0) { return 2; }
-return 0;
+if ($f16 != 0) { exit 1; }
+if ($fb != 0) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_intro_counts' . $brocken->ext;
@@ -188,8 +188,8 @@ SKIP: {
 my ptr $hb = Brocken::heap_base();
 my i64 $s = Brocken::Runtime::mem_status($hb);
 # Expected: all bits 0 (line not full, block not full, no free objects/blocks)
-if ($s != 0) { return 1; }
-return 0;
+if ($s != 0) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_mem_status_init' . $brocken->ext;
@@ -213,8 +213,8 @@ my $a11=11;my $a12=12;my $a13=13;my $a14=14;
 my i64 $s = Brocken::Runtime::mem_status($hb);
 # bit 0 (value 1) should be set
 my i64 $expected = 1;
-if ($s != $expected) { return 1; }
-return 0;
+if ($s != $expected) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_mem_status_line_full' . $brocken->ext;
@@ -239,8 +239,8 @@ my i64 $before = Brocken::Runtime::free16_count($hb);
 my i64 $after = Brocken::Runtime::free16_count($hb);
 # free16_count should increase by 1 (the box(42) was freed)
 my i64 $diff = Brocken::i64_sub($after, $before);
-if ($diff != 1) { return 1; }
-return 0;
+if ($diff != 1) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_block_decref' . $brocken->ext;
@@ -263,8 +263,8 @@ $x = 99;
 # After reassignment, the old value (10) was decref'd and pushed to free16_head
 my i64 $s = Brocken::Runtime::mem_status($hb);
 # bit 2 (value 4) should be set
-if (Brocken::band($s, 4) == 0) { return 1; }
-return 0;
+if (Brocken::band($s, 4) == 0) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_mem_status_free16' . $brocken->ext;
@@ -283,24 +283,24 @@ SKIP: {
 my ptr $hb = Brocken::heap_base();
 my i64 $w0 = Brocken::Runtime::line_waste($hb);
 # Initially: line 0 starts at block+32, limit at block+256 → waste = 224
-if ($w0 != 224) { return 1; }
+if ($w0 != 224) { exit 1; }
 my $x = 42;
 my i64 $w1 = Brocken::Runtime::line_waste($hb);
 # After 1 alloc (16 bytes): waste = 224 - 16 = 208
-if ($w1 != 208) { return 2; }
+if ($w1 != 208) { exit 2; }
 # Fill the rest of line 0 (13 more allocs: 14 total = 224 bytes)
 my $a1=1;my $a2=2;my $a3=3;my $a4=4;my $a5=5;
 my $a6=6;my $a7=7;my $a8=8;my $a9=9;my $a10=10;
 my $a11=11;my $a12=12;my $a13=13;
 my i64 $w15 = Brocken::Runtime::line_waste($hb);
 # After 14 allocs: waste = 0 (line exhausted)
-if ($w15 != 0) { return 3; }
+if ($w15 != 0) { exit 3; }
 # The next alloc advances to line 1
 my $a16 = 16;
 my i64 $w16 = Brocken::Runtime::line_waste($hb);
 # Line 1 has full 256 bytes, waste = 256 - 16 = 240
-if ($w16 != 240) { return 4; }
-return 0;
+if ($w16 != 240) { exit 4; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_line_waste' . $brocken->ext;
@@ -318,15 +318,15 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $lc0 = Brocken::Runtime::live_count($hb);
-if ($lc0 != 0) { return 1; }
+if ($lc0 != 0) { exit 1; }
 my $a = 10;
 my i64 $lc1 = Brocken::Runtime::live_count($hb);
-if ($lc1 != 1) { return 2; }
+if ($lc1 != 1) { exit 2; }
 my $b = 20;
 my $c = 30;
 my i64 $lc3 = Brocken::Runtime::live_count($hb);
-if ($lc3 != 3) { return 3; }
-return 0;
+if ($lc3 != 3) { exit 3; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_live_count' . $brocken->ext;
@@ -345,17 +345,17 @@ SKIP: {
 my ptr $hb = Brocken::heap_base();
 # Check live_count initial and during block
 my i64 $lc0 = Brocken::Runtime::live_count($hb);
-if ($lc0 != 0) { return 1; }
+if ($lc0 != 0) { exit 1; }
 {
     my $x = 42;
     my i64 $lc_inside = Brocken::Runtime::live_count($hb);
     # Inside the block, $x's value is live
-    if ($lc_inside != 1) { return 2; }
+    if ($lc_inside != 1) { exit 2; }
 }
 # After block exit, $x was decref'd → live_count back to 0
 my i64 $lc_after = Brocken::Runtime::live_count($hb);
-if ($lc_after != 0) { return 3; }
-return 0;
+if ($lc_after != 0) { exit 3; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_live_count_dec' . $brocken->ext;
@@ -376,11 +376,11 @@ my i64 $lc0 = Brocken::Runtime::live_count($hb);
 if ($lc0 == 0) {
     my $x = 42;
     my i64 $inside = Brocken::Runtime::live_count($hb);
-    if ($inside != 1) { return 2; }
+    if ($inside != 1) { exit 2; }
 }
 my i64 $after = Brocken::Runtime::live_count($hb);
-if ($after != 0) { return 3; }
-return 0;
+if ($after != 0) { exit 3; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_if_then' . $brocken->ext;
@@ -402,11 +402,11 @@ if (1 == 2) {
 else {
     my $y = 7;
     my i64 $inside = Brocken::Runtime::live_count($hb);
-    if ($inside != 1) { return 2; }
+    if ($inside != 1) { exit 2; }
 }
 my i64 $after = Brocken::Runtime::live_count($hb);
-if ($after != 0) { return 3; }
-return 0;
+if ($after != 0) { exit 3; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_if_else' . $brocken->ext;
@@ -428,11 +428,11 @@ my i64 $before = Brocken::Runtime::free16_count($hb);
 my Any $z;
 my i64 $r = fill($z);
 my i64 $after = Brocken::Runtime::free16_count($hb);
-if ($r != 5) { return 1; }
+if ($r != 5) { exit 1; }
 # $x was null, so //= stored a fresh box; the slot is promoted to owned and the box is released at exit.
 my i64 $diff = Brocken::i64_sub($after, $before);
-if ($diff != 1) { return 2; }
-return 0;
+if ($diff != 1) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_orassign_borrow' . $brocken->ext;
@@ -458,10 +458,10 @@ while (1 == 1) {
 my i64 $after = Brocken::Runtime::free16_count($hb);
 # The enclosing Any must survive the break cleanup; the loop-body Any must be released exactly once.
 my i64 $n = $keep;
-if ($n != 7) { return 1; }
+if ($n != 7) { exit 1; }
 my i64 $diff = Brocken::i64_sub($after, $before);
-if ($diff != 1) { return 2; }
-return 0;
+if ($diff != 1) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_last_scope' . $brocken->ext;
@@ -484,39 +484,39 @@ Brocken::Runtime::clear_block_bitmap($block);
 
 # Initially no lines marked
 my i64 $s0 = Brocken::Runtime::sweep_block($block);
-if ($s0 != 0) { return 1; }
+if ($s0 != 0) { exit 1; }
 
 # Mark line 0 (word 0, bits 0-1)
 Brocken::Runtime::mark_line($block, 0);
 my i64 $s1 = Brocken::Runtime::sweep_block($block);
-if ($s1 != 1) { return 2; }
+if ($s1 != 1) { exit 2; }
 
 # Mark line 1 (word 0, bits 2-3)
 Brocken::Runtime::mark_line($block, 1);
 my i64 $s2 = Brocken::Runtime::sweep_block($block);
-if ($s2 != 2) { return 3; }
+if ($s2 != 2) { exit 3; }
 
 # Mark line 31 (last line of first i64 word, bits 62-63)
 Brocken::Runtime::mark_line($block, 31);
 my i64 $s3 = Brocken::Runtime::sweep_block($block);
-if ($s3 != 3) { return 4; }
+if ($s3 != 3) { exit 4; }
 
 # Mark line 32 (first line of second i64 word)
 Brocken::Runtime::mark_line($block, 32);
 my i64 $s4 = Brocken::Runtime::sweep_block($block);
-if ($s4 != 4) { return 5; }
+if ($s4 != 4) { exit 5; }
 
 # Mark line 64 (first line of third i64 word)
 Brocken::Runtime::mark_line($block, 64);
 my i64 $s5 = Brocken::Runtime::sweep_block($block);
-if ($s5 != 5) { return 6; }
+if ($s5 != 5) { exit 6; }
 
 # Mark line 127 (last line of fourth i64 word)
 Brocken::Runtime::mark_line($block, 127);
 my i64 $s6 = Brocken::Runtime::sweep_block($block);
-if ($s6 != 6) { return 7; }
+if ($s6 != 6) { exit 7; }
 
-return 0;
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_mark_sweep' . $brocken->ext;
@@ -539,8 +539,8 @@ my ptr $block = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 Brocken::Runtime::recycle_block($hb, $block);
 my i64 $fb1 = Brocken::Runtime::free_blocks_count($hb);
 my i64 $expected = Brocken::i64_add($fb0, 1);
-if ($fb1 != $expected) { return 1; }
-return 0;
+if ($fb1 != $expected) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_recycle_manual' . $brocken->ext;
@@ -563,8 +563,8 @@ my ptr $hb = Brocken::heap_base();
 }
 # The decref of $x's value should have recycled the block (live_count 1→0)
 my i64 $fb = Brocken::Runtime::free_blocks_count($hb);
-if ($fb == 0) { return 1; }
-return 0;
+if ($fb == 0) { exit 1; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_recycle_auto' . $brocken->ext;
@@ -584,7 +584,7 @@ my ptr $hb = Brocken::heap_base();
 my ptr $block0 = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 my ptr $cb = Brocken::load_i64(Brocken::ptr_add($hb, 80));
 # Sanity: current_block starts as hb + icb_size()
-if (Brocken::ptr_cmp_eq($cb, $block0) == 0) { return 1; }
+if (Brocken::ptr_cmp_eq($cb, $block0) == 0) { exit 1; }
 # Mark all 128 lines in the bitmap so find_free_line returns -1
 my i64 $i = 0;
 while (Brocken::ptr_cmp_gt(128, $i)) {
@@ -604,20 +604,20 @@ Brocken::store_i64(Brocken::ptr_add($block0, 32752), 0);
 my $x = 42;
 my ptr $after_cb = Brocken::load_i64(Brocken::ptr_add($hb, 80));
 # current_block should have changed
-if (Brocken::ptr_cmp_eq($after_cb, $block0)) { return 2; }
+if (Brocken::ptr_cmp_eq($after_cb, $block0)) { exit 2; }
 # New block should have live_count = 1
 my i64 $lc = Brocken::load_i64(Brocken::ptr_add($after_cb, 32752));
-if ($lc != 1) { return 3; }
+if ($lc != 1) { exit 3; }
 # New block bitmap: word0 has state for line 0 set to 1, rest zero
 my i64 $bm0 = Brocken::load_i64($after_cb);
 my i64 $bm1 = Brocken::load_i64(Brocken::ptr_add($after_cb, 8));
 my i64 $bm2 = Brocken::load_i64(Brocken::ptr_add($after_cb, 16));
 my i64 $bm3 = Brocken::load_i64(Brocken::ptr_add($after_cb, 24));
-if ($bm0 != 1) { return 4; }
-if ($bm1 != 0) { return 5; }
-if ($bm2 != 0) { return 6; }
-if ($bm3 != 0) { return 7; }
-return 0;
+if ($bm0 != 1) { exit 4; }
+if ($bm1 != 0) { exit 5; }
+if ($bm2 != 0) { exit 6; }
+if ($bm3 != 0) { exit 7; }
+exit 0;
 BROCKEN
         my $module = Brocken->new->compile($source);
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -642,7 +642,7 @@ my $b = 20;
 my $c = 30;
 # live_count should be 3
 my i64 $lc_initial = Brocken::load_i64(Brocken::ptr_add($block0, 32752));
-if ($lc_initial != 3) { return 1; }
+if ($lc_initial != 3) { exit 1; }
 # Mark all 128 lines in the bitmap so find_free_line returns -1
 my i64 $i = 0;
 while (Brocken::ptr_cmp_gt(128, $i)) {
@@ -657,14 +657,14 @@ Brocken::store_i64(Brocken::ptr_add($hb, 32), $fake_end);
 # Allocate again — find_free_line finds no free lines → triggers new block from legacy heap
 my $d = 99;
 my ptr $new_block = Brocken::load_i64(Brocken::ptr_add($hb, 80));
-if (Brocken::ptr_cmp_eq($new_block, $block0)) { return 2; }
+if (Brocken::ptr_cmp_eq($new_block, $block0)) { exit 2; }
 # New block's live_count = 1
 my i64 $lc_new = Brocken::load_i64(Brocken::ptr_add($new_block, 32752));
-if ($lc_new != 1) { return 3; }
+if ($lc_new != 1) { exit 3; }
 # Old block's live_count still 3
 my i64 $lc_old = Brocken::load_i64(Brocken::ptr_add($block0, 32752));
-if ($lc_old != 3) { return 4; }
-return 0;
+if ($lc_old != 3) { exit 4; }
+exit 0;
 BROCKEN
         my $module = Brocken->new->compile($source);
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );

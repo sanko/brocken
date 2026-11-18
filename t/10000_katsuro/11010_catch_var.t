@@ -22,12 +22,12 @@ subtest 'the catch variable carries the thrown value' => sub {
     answers( <<'BROCKEN', 5, 'a handler that reads the value' );
 my i64 $r = 0;
 try { throw 5; } catch ($e) { $r = $e; }
-return $r;
+exit $r;
 BROCKEN
     answers( <<'BROCKEN', 42, 'a handler that computes with the value' );
 my i64 $r = 0;
 try { throw 40; } catch ($e) { $r = $e + 2; }
-return $r;
+exit $r;
 BROCKEN
 };
 subtest 'a nested catch reusing the name does not clobber the outer binding' => sub {
@@ -43,7 +43,7 @@ try {
     }
     $r = $r + $e * 10;
 }
-return $r;
+exit $r;
 BROCKEN
 };
 subtest 'distinct catch variables are independent' => sub {
@@ -55,11 +55,11 @@ try {
     try { throw 1; } catch ($inner) { $r = $r + $inner; }
     $r = $r + $outer * 10;
 }
-return $r;
+exit $r;
 BROCKEN
 };
 subtest 'the catch variable is scoped to the catch block' => sub {
-    my $ok = eval { Brocken->new->compile('try { throw 1; } catch ($e) { } return $e;'); 1 };
+    my $ok = eval { Brocken->new->compile('try { throw 1; } catch ($e) { } exit $e;'); 1 };
     ok( !$ok, 'using the catch variable after the block is an error' );
     like( $@, qr/Undefined variable 'e'/, 'the error names the variable' );
 };

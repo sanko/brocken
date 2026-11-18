@@ -46,7 +46,7 @@ class Plain {
 }
 my ptr $n = Node->new(id => 1);
 my ptr $p = Plain->new(n => 2);
-return $p->n;
+exit $p->n;
 BROCKEN
     ok( !$@, 'compiled class program' ) or diag $@;
 
@@ -80,7 +80,7 @@ class Node {
     field i64  $id   :param;
 }
 my ptr $a = Node->new(id => 1);
-return $a->id;
+exit $a->id;
 BROCKEN
     ok( !$@, 'compiled class program' ) or diag $@;
     my $writer = find_function( $mod, 'Node::set_succ' )->as_string;
@@ -97,7 +97,7 @@ my ptr $p  = Probe->new();
     $a->tie();
 }
 Brocken::Runtime::gc_drain($hb);
-return $p->hits();
+exit $p->hits();
 BROCKEN
         1, 'the self-cycle was collected and DESTROY ran exactly once', %native
     );
@@ -114,7 +114,7 @@ my ptr $p  = Probe->new();
     $b->succ = $a;
 }
 Brocken::Runtime::gc_drain($hb);
-return $p->hits();
+exit $p->hits();
 BROCKEN
         2, 'both cycle members were collected and finalized', %native
     );
@@ -128,7 +128,7 @@ my ptr $a  = Node->new(probe => $p, id => 1);
 $a->tie();
 Brocken::Runtime::push_suspect_buffer($a, $hb);
 Brocken::Runtime::gc_drain($hb);
-return $p->hits();
+exit $p->hits();
 BROCKEN
         0, 'the live reference kept the cycle alive through the sweep', %native
     );
@@ -148,7 +148,7 @@ my ptr $p  = Probe->new();
     my ptr $k = keep($a);
 }
 Brocken::Runtime::gc_drain($hb);
-return $p->hits();
+exit $p->hits();
 BROCKEN
         0, 'the escaped instance was not finalized while still reachable', %native
     );
@@ -164,11 +164,11 @@ class Node {
 my ptr $a = Node->new(id => 1);
 my ptr $b = Node->new(id => 2);
 $a->succ = $b;
-if ($a->succ->id != 2) { return 91; }
-if ($a->succ->show() != 2) { return 92; }
+if ($a->succ->id != 2) { exit 91; }
+if ($a->succ->show() != 2) { exit 92; }
 my ptr $s = $a->succ;
-if ($s->show() != 2) { return 93; }
-return 0;
+if ($s->show() != 2) { exit 93; }
+exit 0;
 BROCKEN
         0, 'field read, chained method call, and borrowed local all resolve the class', %native
     );

@@ -137,7 +137,7 @@ Goal: Complete fidelity with the Blackburn & McKinley (PLDI 2008) Immix paper an
   - [x] `defined $var` tests for non-null tags on managed types and folds to true for native types.
 - [x] **`say` / `print` Stringification & Variadic Concatenation:** Each argument is stringified (an integer, float, or boxed `Any` through its header tag; a `String` is passed through unchanged) and the pieces concatenated through the managed `str_concat` into the single pointer `puts` takes, so `say('a', 'b')` prints `ab` rather than only the first argument. `say()` with no argument prints one empty line.
 - [x] **Process & Diagnostic Builtins:**
-  - [x] Implemented `exit($code)` calling libc exit with proper unboxing, string coercion, and default `0` termination (`_BROCKEN_ENTRY` fallback).
+  - [x] Implemented `exit($code)` with proper unboxing, string coercion, and default `0` termination. Parentheses are optional, so `exit 0` is `exit(0)`. An `exit` in `_BROCKEN_ENTRY` (the top level) lowers to the entry's return, so `exit N` matches a top-level `return N` on every target (the PE/ARM64 stubs truncate the status to 8 bits, MachO hands it to `exit`); an `exit` inside a nested function calls libc `exit`.
   - [x] Implemented zero-allocation runtime warning infrastructure (`rt_warn`, `rt_print_u64`, `rt_warn_non_numeric`, `str_to_i64_checked`) streaming directly to `stderr` (FD 2).
   - [x] Implemented `warn(@msgs)` formatting messages to `stderr`.
   - [x] Implemented `die(@msgs)` raising SJLJ exceptions or terminating process with status 255.

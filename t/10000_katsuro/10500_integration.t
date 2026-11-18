@@ -10,12 +10,12 @@ subtest 'Return constant' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken->new->compile('return 42;');
+        my $module = Brocken->new->compile('exit 42;');
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
         my $file   = $brocken->tmpdir . '/e2e_ret_const' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 42, 'return 42' );
+        is( $? >> 8, 42, 'exit 42' );
         unlink $file;
     }
 };
@@ -28,7 +28,7 @@ SKIP: {
 my i64 $x = 10;
 my i64 $y;
 $y = 32;
-return $x + $y;
+exit $x + $y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_vars' . $brocken->ext;
@@ -45,7 +45,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $r = 1 + 2 * 3;
-return $r;
+exit $r;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_arith' . $brocken->ext;
@@ -63,9 +63,9 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $x = 1;
 if ($x) {
-    return 42;
+    exit 42;
 } else {
-    return 0;
+    exit 0;
 }
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
@@ -84,9 +84,9 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $x = 0;
 if ($x) {
-    return 0;
+    exit 0;
 } else {
-    return 42;
+    exit 42;
 }
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
@@ -109,7 +109,7 @@ while ($i < 10) {
     $s = $s + $i;
     $i = $i + 1;
 }
-return $s;
+exit $s;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_while' . $brocken->ext;
@@ -127,9 +127,9 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $a = 10;
 my i64 $b = 20;
-if ($a == $b) { return 1; }
-if ($a != $b) { return 2; }
-return 0;
+if ($a == $b) { exit 1; }
+if ($a != $b) { exit 2; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_cmp' . $brocken->ext;
@@ -148,7 +148,7 @@ SKIP: {
 sub helper() :returns(i64) {
     return 42;
 }
-return helper();
+exit helper();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_call' . $brocken->ext;
@@ -173,7 +173,7 @@ sub factorial(i64 $n) :returns(i64) {
     }
     return $result;
 }
-return factorial(5);
+exit factorial(5);
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_fact' . $brocken->ext;
@@ -190,8 +190,8 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $a = 0;
-if (! $a) { return 42; }
-return 0;
+if (! $a) { exit 42; }
+exit 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_not' . $brocken->ext;
@@ -211,7 +211,7 @@ class Point {
     field i64 $x :param :reader;
 }
 my ptr $p = Point->new(x => 42);
-return $p->x();
+exit $p->x();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_class_reader' . $brocken->ext;
@@ -232,7 +232,7 @@ class Counter {
 }
 my ptr $c = Counter->new(count => 10);
 $c->set_count(32);
-return $c->count();
+exit $c->count();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_class_writer' . $brocken->ext;
@@ -255,7 +255,7 @@ class Point {
     }
 }
 my ptr $p = Point->new(x => 3);
-return $p->x();
+exit $p->x();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_class_adjust' . $brocken->ext;
@@ -276,7 +276,7 @@ class Point {
     method double() :returns(i64) { return $x * 2; }
 }
 my ptr $p = Point->new(x => 21);
-return $p->double();
+exit $p->double();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_class_method' . $brocken->ext;
@@ -296,7 +296,7 @@ class Point {
     field i64 $x :param;
 }
 my ptr $p = Point->new(x => 42);
-return $p->x;
+exit $p->x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_field_read' . $brocken->ext;
@@ -317,7 +317,7 @@ class Point {
 }
 my ptr $p = Point->new(x => 10);
 $p->x = 42;
-return $p->x;
+exit $p->x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_field_write' . $brocken->ext;
@@ -338,7 +338,7 @@ SKIP: {
         my $module = $c->compile(<<'BROCKEN');
 my i64 $x = 10;
 my i64 $y = 32;
-return $x + $y;
+exit $x + $y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_implicit_main' . $brocken->ext;
@@ -364,7 +364,7 @@ my [i64; 5] @arr;
 @arr[3] = 40;
 @arr[4] = 50;
 my i64 $sum = @arr[0] + @arr[1] + @arr[2] + @arr[3] + @arr[4];
-return $sum;
+exit $sum;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_array_sum' . $brocken->ext;
@@ -388,7 +388,7 @@ my [i64; 3] @arr;
 @arr[0] = 1;
 @arr[1] = 2;
 @arr[2] = 3;
-return @arr[0] + @arr[1] + @arr[2];
+exit @arr[0] + @arr[1] + @arr[2];
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_array_feature' . $brocken->ext;
@@ -410,7 +410,7 @@ my i64 $b = Brocken::bor(240, 15);
 my i64 $c = Brocken::bxor(255, 15);
 my i64 $d = Brocken::shl(1, 4);
 my i64 $e = Brocken::shr(255, 4);
-return $a + $b - $c + $d + $e;
+exit $a + $b - $c + $d + $e;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_bitwise' . $brocken->ext;
@@ -436,7 +436,7 @@ SKIP: {
         subtest 'Syscall discarded result, program continues' => sub {
             my $module = $c->compile(<<'BROCKEN');
 Brocken::syscall(0, 0, 0, 0, 0, 0, 0);
-return 42;
+exit 42;
 BROCKEN
             my $funcs = $brocken->codegen->emit_functions( $module->functions );
             my $file  = $brocken->tmpdir . '/e2e_syscall_discard' . $brocken->ext;
@@ -448,7 +448,7 @@ BROCKEN
         subtest 'Syscall return value captured' => sub {
             my $module = $c->compile(<<'BROCKEN');
 my i64 $r = Brocken::syscall(0, 0, 0, 0, 0, 0, 0);
-return $r;
+exit $r;
 BROCKEN
             my $funcs = $brocken->codegen->emit_functions( $module->functions );
             my $file  = $brocken->tmpdir . '/e2e_syscall_retval' . $brocken->ext;
@@ -473,7 +473,7 @@ SKIP: {
         skip 'Exit syscall crashes or misbehaves on this platform' if $host->is_openbsd;
         skip 'Exit syscall returns on NetBSD ARM64'                if $host->is_netbsd && $host->is_arm64;
         my $module = $c->compile( <<'BROCKEN', '(eval)', $host );
-return Brocken::syscall_by_name("exit", 42);
+exit Brocken::syscall_by_name("exit", 42);
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_syscall_by_name' . $brocken->ext;
@@ -496,7 +496,7 @@ SKIP: {
         my $module = $c->compile(<<'BROCKEN');
 my i64 $neg = 100 - 142;
 my i64 $r = Brocken::libc("abs", $neg);
-return $r;
+exit $r;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_libc_abs' . $brocken->ext;
@@ -541,7 +541,7 @@ while ($i < 100) {
     if ($i >= 5) { last; }
     $i = $i + 1;
 }
-return $s;
+exit $s;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_break' . $brocken->ext;
@@ -564,7 +564,7 @@ while ($i < 10) {
     if ($i % 2 == 0) { next; }
     $s = $s + $i;
 }
-return $s;
+exit $s;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_continue' . $brocken->ext;
@@ -583,7 +583,7 @@ SKIP: {
 my i64 $a = 1;
 my i64 $b = 0;
 my i64 $r = $a ? 42 : 0;
-return $r + ($b ? 99 : 3);
+exit $r + ($b ? 99 : 3);
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/e2e_ternary' . $brocken->ext;

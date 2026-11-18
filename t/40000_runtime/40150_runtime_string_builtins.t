@@ -33,7 +33,7 @@ say( Brocken::Runtime::str_lc( $hb, $s ) );
 say( Brocken::Runtime::str_uc( $hb, $s ) );
 say( Brocken::Runtime::str_lcfirst( $hb, $s ) );
 say( Brocken::Runtime::str_ucfirst( $hb, "hello" ) );
-return 0;
+exit 0;
 BROCKEN
     is $rc,  0,                                                                                  'exit 0';
     is $out, "11\nWorld\nello\nello Worl\n3\n9\nhello world\nHELLO WORLD\nhello World\nHello\n", 'direct runtime string helpers';
@@ -59,7 +59,7 @@ say( lc($dyn) );
 say( uc($dyn) );
 say( lcfirst($dyn) );
 say( ucfirst("brocken") );
-return 0;
+exit 0;
 BROCKEN
     is $rc,  0,                                                                                             'exit 0';
     is $out, "7\n0\n0\ncdef\nef\nbcd\nbcd\nBroc\n2\n4\n-1\n4\n2\n-1\nbrocken\nBROCKEN\nbrocken\nBrocken\n", 'user-facing string builtins';

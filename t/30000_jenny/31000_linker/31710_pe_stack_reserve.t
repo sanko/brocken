@@ -25,7 +25,7 @@ sub pe_stack_sizes ($file) {
 my $windows = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
 
 sub link_exe ( $brocken, $name ) {
-    my $module = $brocken->compile("use feature 'brocken_native_types';\nreturn 7;\n");
+    my $module = $brocken->compile("use feature 'brocken_native_types';\nexit 7;\n");
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = $brocken->tmpdir . "/$name.exe";
     $brocken->linker->write_executable( $file, $funcs, $brocken->platform );

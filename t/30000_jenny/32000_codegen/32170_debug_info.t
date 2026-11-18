@@ -54,7 +54,7 @@ SKIP: {
 my i64 $x = 10;
 my i64 $y = 20;
 my i64 $z = $x + $y;
-return $z;
+exit $z;
 BROCKEN
         my $module    = Brocken->new->compile( $source, 'test_levels.brocken' );
         my $ir_funcs  = $module->functions;
@@ -133,7 +133,7 @@ SKIP: {
 my i64 $a = 10;
 my i64 $b = 20;
 my i64 $c = $a + $b;
-return $c;
+exit $c;
 BROCKEN
         my $module    = Brocken->new->compile( $source, 'test_gdb.brocken' );
         my $ir_funcs  = $module->functions;
@@ -226,7 +226,7 @@ class Point {
     field i64 $y :param;
 }
 my ptr $p = Point->new(x => 10, y => 20);
-return $p->x;
+exit $p->x;
 BROCKEN
         my $module     = Brocken->new->compile( $source, 'test_struct_die.brocken' );
         my $class_info = $module->class_info;
@@ -278,7 +278,7 @@ SKIP: {
         skip 'Windows only', 1 unless $host->is_windows;
         my $source = <<'BROCKEN';
 my i64 $x = 42;
-return $x;
+exit $x;
 BROCKEN
         my $module    = Brocken->new->compile( $source, 'test_coff_levels.brocken' );
         my $ir_funcs  = $module->functions;

@@ -20,7 +20,7 @@ class Point {
     field i64 $y :param;
 }
 my ptr $p = Point->new(x => 10, y => 20);
-return $p->x;
+exit $p->x;
 BROCKEN
     ok( !$@, 'compiled class program' ) or diag $@;
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
