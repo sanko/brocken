@@ -944,9 +944,12 @@ subtest 'stale rodata does not persist between fuzz cases' => sub {
     $fuzz->linker->set_rodata( { __stale => "leftover\0" } );
     my $result = $fuzz->test_program( { source => 'return 5;', expected => 5 } );
     is $result->{status}, 'pass', 'no-string program still runs';
-    use Data::Dump;
-    ddx $fuzz->linker->rodata;
-    is [ sort keys %{ $fuzz->linker->rodata } ], [], 'rodata is reset for a case without strings';
+
+    # The compile replaces the linker's table with the case's own module rodata, so the seeded key is gone. Every
+    # program now carries the core runtime's own strings, so the table is not empty; the regression was that a case
+    # with no *user* literals reused the previous case's entries.
+    ok !exists $fuzz->linker->rodata->{__stale},      'stale rodata entry does not persist into the next case';
+    ok scalar( keys %{ $fuzz->linker->rodata } ) > 0, 'the next case supplies its own rodata';
 };
 
 # Bug: _gen_binop_assign always used a variable as the RHS, so immediate-operand lowering was never fuzzed.

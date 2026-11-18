@@ -527,9 +527,20 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $self->check('EOF')             ||
             $self->check( 'KEYWORD', 'if' ) ||
             $self->check( 'KEYWORD', 'unless' ) ) {
-            $expr = $self->parse_expression(0);
-            if ( $expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
-                $expr = Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($ret_token), elements => [ $expr->expr ] );
+
+            # `return ()` is the explicit empty list -- the way a `void` sub spells "hand back nothing". Without this
+            # the `()` would fall through to the parenthesised-expression path and fold to `Const Int 0`, making the sub
+            # look like it returns an integer. Consume both tokens and leave no expression, exactly like a bare
+            # `return`, so the function's declared or inferred return type governs what is handed back.
+            if ( $self->check('(') && ( $tokens->[ $pos + 1 ] // {} )->{type} eq ')' ) {
+                $self->advance();
+                $self->advance();
+            }
+            else {
+                $expr = $self->parse_expression(0);
+                if ( $expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
+                    $expr = Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($ret_token), elements => [ $expr->expr ] );
+                }
             }
         }
         return $self->_end_statement( Brocken::Katsuro::AST::Stmt::Return->new( $self->_pos_token($ret_token), expr => $expr ),

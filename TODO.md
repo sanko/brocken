@@ -21,10 +21,10 @@ This document is the authoritative engineering tracker for bringing the Brocken 
   - [ ] Signed 128-bit `div`/`rem` returns incorrect constants under `qemu-riscv64` and native hardware (`t/30000_jenny/32000_codegen/32650_i128_arithmetic_native.t`).
   - [ ] Implement 64-bit fast-path in `RISCV64.pm` when high words are zero (`hi_lhs == 0 && hi_rhs == 0`).
   - [ ] Replace the 128-iteration fully-unrolled shift-subtract sequence (~5,190 instructions) with a compact looped algorithm or library helper to relieve extreme register pressure.
-- [ ] **Wasm Rodata & Data-Segment Support (Open):**
-  - [ ] Lowerer currently falls through on `RodataRef`, causing boxed string literals in Wasm to receive garbage pointers.
-  - [ ] Port `lea_rodata` / `_materialize` string literal handling from native backends to `Lowerer::Wasm`.
-  - [ ] Add Wasm test runner (`wasmtime` or `node`) to CI harness to validate Wasm execution.
+- [x] **Wasm Rodata & Data-Segment Support:**
+  - [x] `Lowerer::Wasm` now handles `RodataRef` (`_wasm_push` branch), so boxed string literals get a real address instead of garbage.
+  - [x] `lea_rodata` encoding in `Codegen::Wasm` (a `i64.const` placeholder fixed up with `rodata_addr`) and a Data section (id 11) plus `_rodata_base`/`_rodata_layout`/`_initial_pages` in `Linker::Wasm`, ported from the native backends.
+  - [x] Wasm execution is validated in CI: `wasmtime` is provisioned and smoke-tested in `.github/workflows/ci.yml`, and the Wasm tests run through `wasmtime` (or `node`) when available.
 
 ---
 

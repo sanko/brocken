@@ -42,7 +42,10 @@ sub answers ( $src, $want, $name ) {
     my $module = eval { $brocken->compile($src) };
     if ($@) { fail("$name: compile died: $@"); return }
     my $file = temp_path('wasm_reclaim') . '.wasm';
-    Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
+
+    # The instance's own linker already carries the rodata `compile` interned (the runtime's strings), so a bare
+    # `Linker::Wasm->new` would fail to resolve them.
+    $brocken->linker->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
     my $output = qx["$wasmtime" run --invoke _BROCKEN_ENTRY "$file" 1024 2>&1];
     my @lines  = grep {/\S/} split /\n/, $output;
     unlink $file if -e $file;
@@ -87,11 +90,10 @@ subtest 'the pointer moves back' => sub {
     # What distinguishes them is that a function which hands its frame back has to read the pointer before it starts
     # allocating, so the read has to be a `global.get` of index 0 rather than a load from its own frame.
     my $file = temp_path('wasm_reclaim') . '.wasm';
-    Brocken::Jenny::Linker::Wasm->new->write_executable(
-        $file,
-        $brocken->codegen->emit_functions( $brocken->compile('sub f(i64 $n) :returns(i64) { my i64 $a = $n; return $a; } return f(1);')->functions ),
-        $platform
-    );
+
+    # As above: the instance linker carries the rodata that `compile` seeded, which a bare linker would not have.
+    my $module = $brocken->compile('sub f(i64 $n) :returns(i64) { my i64 $a = $n; return $a; } return f(1);');
+    $brocken->linker->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
     my $bytes = do { open my $fh, '<:raw', $file or die $!; local $/; <$fh> };
     unlink $file if -e $file;
 

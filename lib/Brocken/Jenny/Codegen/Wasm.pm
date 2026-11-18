@@ -28,7 +28,7 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
             ],
             source_map     => { $fd->{source_map}->%* },
             return_valtype => $fd->{return_valtype},
-            param_valtypes => [ $fd->{param_valtypes}->@* ],
+            param_valtypes => [ $fd->{param_valtypes}->@* ]
         };
     }
 
@@ -92,7 +92,7 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
             fixups         => \@adjusted_fixups,
             source_map     => \%source_map,
             return_valtype => $result->{return_valtype},
-            param_valtypes => \@param_valtypes,
+            param_valtypes => \@param_valtypes
         };
     }
 
@@ -442,6 +442,17 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
                     my $fixup_pos = length($$buf);
                     $$buf .= pack( 'C', CALL ) . "\x80\x80\x80\x80\x00";    # call + placeholder LEB128
                     push @func_fixups, { type => 'call_idx', target => $func_name, block => $bi, offset => $fixup_pos + 1 };
+                }
+                elsif ( $opcode eq 'lea_rodata' ) {
+
+                    # The address of a string literal is a linear-memory offset the linker assigns, so push an
+                    # `i64.const` whose immediate is patched once the data segment is laid out. The placeholder is the
+                    # same five bytes a call uses: long enough for any address the module can hold, and patched with a
+                    # shorter LEB in the same rebuild pass.
+                    my $label     = $ops[0]->value;
+                    my $fixup_pos = length($$buf);
+                    $$buf .= pack( 'C', I64_CONST ) . "\x80\x80\x80\x80\x00";
+                    push @func_fixups, { type => 'rodata_addr', target => $label, block => $bi, offset => $fixup_pos + 1 };
                 }
                 else {
                     # Silently emitting nothing here is how the encoder produces a module that links but does not

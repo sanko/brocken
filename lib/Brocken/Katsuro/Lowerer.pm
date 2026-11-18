@@ -297,7 +297,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         push @returns, $implicit if defined $implicit;
         my $owned = 0;
         for my $expr (@returns) {
-            if ( defined $expr && $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+
+            # A bare `return;` (or `return ()`) hands back nothing, and a void trailing call is a discarded statement;
+            # neither is an owned box, so neither makes the function owned. Counting them as owned is what put
+            # `rt_write_stderr` -- whose only non-void-looking return was a `Brocken::libc(...)` tail -- into the owned
+            # set and made a discarded call to it emit a `decref` with no heap base.
+            next unless defined $expr;
+            next if $self->_expr_is_void($expr);
+            if ( $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
                 my $n = $expr->name;
 
                 # A bare value the callee does not own is handed back unchanged, so the caller owns the box it stores
@@ -367,7 +374,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # box instead consumes the reference through `_owned_call_result` and must not call this.
     method _release_owned_call_temp( $val, $line, $col ) {
         return unless $self->_owned_call_result($val);
-        my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+
+        # `decref` takes the heap base as its second argument. A core-runtime function has no `%__heap_base` parameter
+        # (its own callers pass a heap base explicitly), so there is no operand to supply and a one-operand `decref`
+        # would emit a call with a missing argument -- invalid Wasm and a stale register natively. Nothing in the
+        # runtime hands back an owned user box, so there is nothing to release here; bail rather than emit the
+        # malformed call.
+        return unless $symbols->{'__heap_base'};
+        my $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
         $builder->build_decref( $val, $line, $col, $hb );
     }
 
@@ -467,8 +481,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     # The expression a function body implicitly returns, or undef. Only a non-void trailing expression qualifies: a
-    # void one (`Brocken::store_i64(...)`, `say(...)`) is a side-effecting statement that is evaluated and discarded,
-    # which keeps a `void` sub `void`.
+    # void one (`Brocken::store_i64(...)`) is a side-effecting statement that is evaluated and discarded, which keeps a
+    # `void` sub `void`.
     method _implicit_return_expr($body) {
         return undef unless $body && $body->statements->@*;
         my $last = $body->statements->[-1];
@@ -478,16 +492,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     # Whether a bare expression statement produces no value. A store intrinsic writes through a pointer and yields
-    # nothing, and a call to a `void` function (or to the `say`/`print` statement builtins) is void too. An
-    # unresolvable call is treated as value-producing, so an untyped forward call still gets the benefit of the doubt
-    # and the re-inference pass (Pass 1.4 in `lower_program`) corrects it once every callee is registered.
+    # nothing, and a call to a `void` function is void too. `say`/`print` are *not* void -- like Perl's, they yield a
+    # bool (`_call_return_type_name` reports it even before their `puts` callee is registered). An unresolvable call is
+    # treated as value-producing, so an untyped forward call still gets the benefit of the doubt and the re-inference
+    # pass (Pass 1.4 in `lower_program`) corrects it once every callee is registered.
     method _expr_is_void($expr) {
         return 0 unless defined $expr;
         return 1 if $expr->isa('Brocken::Katsuro::AST::Expr::IntrinsicCall') && $VOID_INTRINSICS{ $expr->name };
         return 1 if $expr->isa('Brocken::Katsuro::AST::Expr::UndefOp');
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Call') ) {
-            my $name = $expr->func_name;
-            return 1 if $name eq 'say' || $name eq 'print';
+            my $name   = $expr->func_name;
             my $callee = $self->_resolve_callee_function($name);
             return 1 if $callee && $callee->return_type && $callee->return_type->kind eq 'void';
         }
@@ -507,13 +521,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # The Brocken type name a call yields, for the return-type walk: the callee's IR return kind mapped back to a
     # name. `void` is returned as `void` so a void call is not mistaken for a value.
     method _call_return_type_name($expr) {
-        my $callee = $self->_resolve_callee_function( $expr->func_name );
+        my $name = $expr->func_name;
+
+        # `say`/`print` yield a bool (true on success) exactly as Perl's do. Their `puts` callee is registered lazily
+        # on first lowering, so answer from the name rather than waiting for it.
+        return 'bool' if $name eq 'say' || $name eq 'print';
+        my $callee = $self->_resolve_callee_function($name);
         return undef unless $callee && $callee->return_type;
         my $kind = $callee->return_type->kind;
         return 'void' if $kind eq 'void';
         return 'Any'  if $kind eq 'dynamic';
         return 'ptr'  if $kind eq 'ptr';
         return 'f64'  if $kind eq 'float';
+        return 'bool' if $kind eq 'int' && $callee->return_type->bits == 1;
         return 'i64';
     }
 
@@ -600,6 +620,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # A store intrinsic or a void call yields nothing; returning `void` lets the caller drop it from the
         # return-type walk rather than widening the function to `Any`.
         return 'void' if $self->_expr_is_void($expr);
+
+        # A `Brocken::*` intrinsic yields an unboxed scalar or address, never an owned box. Without this the fallback
+        # below would call every intrinsic `Any`, and a runtime helper whose body ends in one (`rt_write_stderr`'s
+        # trailing `Brocken::libc("write", ...)`) would be inferred `Any` and classified as handing back an owned
+        # reference -- the bug that made a discarded `warn` emit a malformed `decref`.
+        # (`builtin::` helpers are excluded: some of them yield a string or a list, so they keep the conservative
+        # fallback rather than being mistaken for an integer.)
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::IntrinsicCall') && $expr->name !~ /^builtin::/ ) {
+            my $name = $expr->name;
+            return 'f64' if $name eq 'load_f64';
+            return 'ptr' if $name eq 'ptr_add' || $name eq 'ptr_sub' || $name eq 'heap_base' || $name eq 'frame_addr';
+            return 'i64';
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Const') ) {
             return 'i64'    if $expr->type eq 'Int';
             return 'f64'    if $expr->type eq 'Float';
@@ -2571,9 +2604,21 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->_emit_stderr_write( $self->_reflect_rodata('Brocken: return outside of a subroutine'), $line, $col );
         }
         if ( defined $ast->expr ) {
-            my $val      = $self->lower_expression( $ast->expr );
             my $ret_type = $current_func->return_type;
-            $val = $self->maybe_convert_type( $val, $ret_type, $line, $col, 1 );
+            my $val      = $self->lower_expression( $ast->expr );
+
+            # A `void` function discards the value: the expression is still evaluated for its side effects, but
+            # nothing is handed back. `maybe_convert_type` has no `void` case and would leave the value untouched,
+            # which would leave a value on the stack for a void signature to reject (Wasm) or corrupt the return
+            # register (native), so drop it here. An owned call temp is released first, so a discarded dynamic call
+            # does not strand its reference.
+            if ( $ret_type && $ret_type->kind eq 'void' ) {
+                $self->_release_owned_call_temp( $val, $line, $col );
+                $val = undef;
+            }
+            else {
+                $val = $self->maybe_convert_type( $val, $ret_type, $line, $col, 1 );
+            }
 
             #~ warn sprintf '[%s] $val->type->kind: %s, $ret_type->kind: %s', $current_func->name, $val->type->kind, $ret_type->kind;
             my @rc_names = sort keys %$needs_rc;
@@ -2586,7 +2631,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             #
             # A function whose every dynamic return is a bare borrowed parameter (+0) is left alone: the box belongs to
             # the caller, who passed it in, and the caller increfs when it stores the result (F3).
-            if ( $val->type && $val->type->kind eq 'dynamic' && $returns_owned->{ $current_func->name } ) {
+            if ( $val && $val->type && $val->type->kind eq 'dynamic' && $returns_owned->{ $current_func->name } ) {
                 $builder->build_incref( $val, $line, $col ) unless $self->_owned_call_result($val);
             }
             if (@rc_names) {
@@ -4794,8 +4839,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             if ( $name eq 'say' || $name eq 'print' ) {
                 my $puts_name = $self->_puts_name;
                 $callee = Brocken::Lindsay::IR::Function->new(
-                    name        => $puts_name,
-                    return_type => Brocken::Lindsay::IR::Type::void(),
+                    name => $puts_name,
+
+                    # `puts` is C `int puts(const char *)`: a non-negative character count on success and EOF (-1) on
+                    # failure. The declared type has to match that ABI so the result can be tested below.
+                    return_type => Brocken::Lindsay::IR::Type::i32(),
                     params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ]
                 );
                 $module->add_function($callee);
@@ -4907,7 +4955,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         $symbols->{ $_->[0] } = $_->[1] for @saved;
         $self->_emit_fuel_check( $line, $col );
-        return $builder->build_call( $callee, \@args, undef, $line, $col );
+        my $call = $builder->build_call( $callee, \@args, undef, $line, $col );
+
+        # `say`/`print` return true on success and false on a write error, as Perl's do. `puts` reports success as a
+        # non-negative count and failure as EOF, so the call's result is compared against zero to yield the bool.
+        if ($stringify_args) {
+            my $zero = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 );
+            return $builder->build_icmp( 'sge', $call, $zero, undef, $line, $col );
+        }
+        return $call;
     }
 
     method _lower_str_length( $ast, $line, $col ) {

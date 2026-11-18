@@ -29,9 +29,36 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
     # free-list head, and the counters that sit beside them), the whole arena, and the frame reserve above it. The fixed
     # single page this used to emit covered the default base of 1024 by coincidence; a base above 64KB would have put
     # the runtime state itself out of bounds, and the frames had nowhere reserved for them at all.
+    #
+    # String literals live above the frame reserve (see `_rodata_base`), so their bytes have to be counted here too: a
+    # module whose literals ran past the last page would validate but trap on the first load of a string.
     method _initial_pages () {
-        my $pages = int( ( $heap_base + Brocken::ICB::SIZE() + $heap_size + FRAME_RESERVE + 65535 ) / 65536 );
+        my $rodata_size = 0;
+        $rodata_size += length( $self->rodata->{$_} ) for keys $self->rodata->%*;
+        my $top   = $heap_base + Brocken::ICB::SIZE() + $heap_size + FRAME_RESERVE + $rodata_size;
+        my $pages = int( ( $top + 65535 ) / 65536 );
         return $pages < 1 ? 1 : $pages;
+    }
+
+    # The address string literals are placed at: above the arena and its frame reserve, so a bump-allocated frame can
+    # never walk into a literal, and above the zero page so a null pointer stays distinguishable from a real one.
+    method _rodata_base () {
+        return $heap_base + Brocken::ICB::SIZE() + $heap_size + FRAME_RESERVE;
+    }
+
+    # Lay the interned literals out in one blob in label order, the same order every native linker uses, and hand back
+    # the blob plus a label -> offset map so a `rodata_addr` fixup can be resolved to an absolute linear-memory address.
+    method _rodata_layout () {
+        my %offsets;
+        my $blob = '';
+        my $off  = 0;
+        for my $label ( sort keys $self->rodata->%* ) {
+            $offsets{$label} = $off;
+            my $bytes = $self->rodata->{$label};
+            $blob .= $bytes;
+            $off += length $bytes;
+        }
+        return ( $blob, \%offsets );
     }
 
     # Shared by both emission paths below, so the page count cannot drift
@@ -103,7 +130,7 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                     bytes          => $fd->{bytes},
                     fixups         => $fd->{fixups}         // [],
                     return_valtype => $fd->{return_valtype} // 0x7F,
-                    param_valtypes => $fd->{param_valtypes} // [],
+                    param_valtypes => $fd->{param_valtypes} // []
                     };
             }
 
@@ -117,13 +144,15 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                     bytes          => $self->_start_body( $entry_index, $func_data[$entry_index] ),
                     fixups         => [],
                     return_valtype => 'void',
-                    param_valtypes => [],
+                    param_valtypes => []
                     };
             }
 
-            # Resolve cross-function call fixups. Each 5-byte placeholder is replaced by a shorter LEB128, so rebuild
-            # each function in a single ordered pass rather than splicing in place and invalidating the offsets of the
-            # fixups that follow.
+            # Resolve cross-function call and rodata-address fixups. Each 5-byte placeholder is replaced by a shorter
+            # LEB128, so rebuild each function in a single ordered pass rather than splicing in place and invalidating
+            # the offsets of the fixups that follow.
+            my ( $rodata_blob, $rodata_offsets ) = $self->_rodata_layout;
+            my $rodata_base = $self->_rodata_base;
             for my $fd (@func_data) {
                 my @fixups = sort { $a->{offset} <=> $b->{offset} } $fd->{fixups}->@*;
                 next unless @fixups;
@@ -131,13 +160,27 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                 my $out   = '';
                 my $pos   = 0;
                 for my $fixup (@fixups) {
-                    next unless $fixup->{type} eq 'call_idx';
-                    my $target_idx = $func_offsets{ $fixup->{target} };
-                    die "Wasm write_executable: undefined function '$fixup->{target}'" unless defined $target_idx;
                     my $at = $fixup->{offset};
-                    die "Wasm write_executable: call fixup out of range in $fd->{name}" if $at < $pos || $at + 5 > length($bytes);
+                    my $encoded;
+                    if ( $fixup->{type} eq 'call_idx' ) {
+                        my $target_idx = $func_offsets{ $fixup->{target} };
+                        die "Wasm write_executable: undefined function '$fixup->{target}'" unless defined $target_idx;
+                        $encoded = $self->_uleb($target_idx);
+                    }
+                    elsif ( $fixup->{type} eq 'rodata_addr' ) {
+                        my $off = $rodata_offsets->{ $fixup->{target} };
+                        die "Wasm write_executable: undefined rodata label '$fixup->{target}'" unless defined $off;
+
+                        # The immediate of an `i64.const` is a *signed* LEB128, so an address whose top payload bit
+                        # lands in the final byte (64, say) needs the extra sign byte `_sleb` adds.
+                        $encoded = $self->_sleb( $rodata_base + $off );
+                    }
+                    else {
+                        next;
+                    }
+                    die "Wasm write_executable: fixup out of range in $fd->{name}" if $at < $pos || $at + 5 > length($bytes);
                     $out .= substr( $bytes, $pos, $at - $pos );
-                    $out .= $self->_uleb($target_idx);
+                    $out .= $encoded;
                     $pos = $at + 5;
                 }
                 $fd->{bytes} = $out . substr( $bytes, $pos );
@@ -220,12 +263,23 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
             my $code_count = $self->_uleb( scalar @func_data );
             $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_sec) + length($code_count) ) . $code_count . $code_sec;
             die 'Wasm code section too large' if length($code_sec) > 268435456;
+
+            # Data Section (ID 11): one active segment holding every interned literal, placed above the arena and its
+            # frame reserve. The code refers to the same addresses through `rodata_addr` fixups, so the base has to be
+            # the one `_rodata_base` promised the page count. Omitted entirely when the module interns no literals.
+            my $data_sec = '';
+            if ( length $rodata_blob ) {
+                my $offset_expr = pack( 'C', 0x41 ) . $self->_sleb($rodata_base) . pack( 'C', 0x0B );                      # i32.const <base>; end
+                my $segment     = pack( 'C', 0x00 ) . $offset_expr . $self->_uleb( length $rodata_blob ) . $rodata_blob;
+                my $content     = $self->_uleb(1) . $segment;
+                $data_sec = pack( 'C', 11 ) . $self->_uleb( length $content ) . $content;
+            }
             sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
             binmode $fh;
 
             # WASM magic number \0asm + version 1 (MVP)
             print $fh "\0asm\x01\x00\x00\x00";
-            print $fh $type_sec, $func_sec, $mem_sec, $global_sec, $export_sec, $code_sec;
+            print $fh $type_sec, $func_sec, $mem_sec, $global_sec, $export_sec, $code_sec, $data_sec;
             close $fh;
             return;
         }

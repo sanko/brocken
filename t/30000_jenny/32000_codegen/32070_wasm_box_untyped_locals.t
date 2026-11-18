@@ -54,8 +54,11 @@ my $runner = $wasmtime && -x $wasmtime ? 'wasmtime' : ( $node && -x $node ? 'nod
 # an address past the end of it.
 sub memory_covers_heap ($name) {
     my $file = temp_path('wasm_box') . '.wasm';
-    Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $brocken->compile('return 42;')->functions ),
-        $platform );
+
+    # The instance's own linker already carries the rodata `compile` interned (the runtime's strings), so a bare
+    # `Linker::Wasm->new` would fail to resolve them.
+    my $module = $brocken->compile('return 42;');
+    $brocken->linker->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
     my $bytes = do { open my $fh, '<:raw', $file or die $!; local $/; <$fh> };
     unlink $file if -e $file;
 

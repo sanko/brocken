@@ -3050,6 +3050,18 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
             );
         }
 
+        # A string literal arrives as a `RodataRef`: it carries a content-derived label but no register name, so the
+        # generic path below would emit `local_get undef` and the code generator would hand out an i32 local holding
+        # nothing -- invalid Wasm at the first store or call that expects a 64-bit pointer. Instead emit a
+        # `lea_rodata`, whose label the linker resolves to the address the literal is placed at in linear memory.
+        if ( $ir_val->isa('Brocken::Lindsay::IR::RodataRef') ) {
+            return Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'lea_rodata',
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'rodata_label', value => $ir_val->label ) ],
+                comment  => 'lea_rodata ' . $ir_val->label
+            );
+        }
+
         # A 128-bit value has no local of its own: it lives in the `_lo`/`_hi` pair `_split_i128` writes, and a
         # consumer that wants one word gets the lo half, exactly as the constant path below pushes it. This is what
         # a narrowing `and` on a wide operand feeds -- the instruction's result type is the narrow target, so the

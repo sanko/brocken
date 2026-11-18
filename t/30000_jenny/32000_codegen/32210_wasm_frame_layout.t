@@ -112,8 +112,11 @@ subtest 'the bump pointer is a module global' => sub {
     # for the wrong reason if a future change reintroduced one alongside the global. Read the section list of a linked
     # module and look for id 6.
     my $file = temp_path('wasm_frame') . '.wasm';
-    Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $brocken->compile('return 1;')->functions ),
-        $platform );
+
+    # The instance's own linker already carries the rodata `compile` interned (the runtime's strings), so a bare
+    # `Linker::Wasm->new` would fail to resolve them.
+    my $module = $brocken->compile('return 1;');
+    $brocken->linker->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
     my $bytes = do { open my $fh, '<:raw', $file or die $!; local $/; <$fh> };
     unlink $file if -e $file;
     my ( %sections, $global_at, $pos );

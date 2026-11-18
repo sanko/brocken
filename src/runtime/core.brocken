@@ -1086,14 +1086,22 @@ package Brocken::Runtime {
         return $len;
     }
 
-    sub rt_write_stderr( ptr $s, i64 $len ) {
-        if ( Brocken::ptr_cmp_eq( $s, 0 ) || $len <= 0 ) { return; }
-        Brocken::libc( "write", 2, $s, $len );
+    # Writes `$len` bytes at `$s` to stderr. Like Perl's `print`/`warn`, it reports success as a bool rather than
+    # nothing: the raw `write(2)` yields the byte count (>= 0) on success and -1 on failure, so the result is tested
+    # against 0. A null pointer or an empty write has nothing to fail and counts as success. This is also why the
+    # function is not `void` -- a `void` annotation would make `warn`/`die` unable to observe a failed write, and the
+    # dynamic return type it used to infer was the source of a spurious owned-reference release.
+    sub rt_write_stderr( ptr $s, i64 $len ) :returns(bool) {
+        if ( Brocken::ptr_cmp_eq( $s, 0 ) || $len <= 0 ) { return true; }
+        my i64 $n = Brocken::libc( "write", 2, $s, $len );
+        return $n >= 0;
     }
 
-    # Generic warning output routines:
-    sub rt_warn( ptr $msg, ptr $file = 0, i64 $line = 0, i64 $col = 0 ) {
-         return () if Brocken::ptr_cmp_eq( $msg, 0 );
+    # Generic warning output routines. `warn` returns true in Perl -- it does not signal through its return value, so
+    # the only job here is to keep the type a plain `bool` rather than the dynamic type an unmodelled trailing call
+    # would otherwise infer (which marked the function as handing back an owned box).
+    sub rt_warn( ptr $msg, ptr $file = 0, i64 $line = 0, i64 $col = 0 ) :returns(bool) {
+         return true if Brocken::ptr_cmp_eq( $msg, 0 );
         my i64 $len = str_len($msg);
         rt_write_stderr( $msg, $len );
 
@@ -1173,7 +1181,7 @@ package Brocken::Runtime {
                rt_write_stderr( "\n", 1 );
            }
          }
-        return ();
+        return true;
      }
 
   sub rt_warn_non_numeric( ptr $val_str, ptr $file = 0, i64 $line = 0, i64 $col = 0 ) :returns(bool) {

@@ -333,8 +333,12 @@ subtest 'a narrow signed value survives a round trip on Wasm' => sub {
         my ( $name, $src ) = @$c;
         my $module = temp_path( 'narrow_' . $name ) . '.wasm';
         my $ir;
-        ok lives { $ir = Brocken->new( platform => $platform )->compile($src) }, 'compile';
-        Brocken::Jenny::Linker::Wasm->new->write_executable( $module, $codegen->emit_functions( $ir->functions ), $platform );
+        my $bk;
+        ok lives { $bk = Brocken->new( platform => $platform ); $ir = $bk->compile($src) }, 'compile';
+
+        # The instance's own linker already carries the rodata `compile` interned (the runtime's strings), so a bare
+        # `Linker::Wasm->new` would fail to resolve them.
+        $bk->linker->write_executable( $module, $codegen->emit_functions( $ir->functions ), $platform );
         my $compile = qq["$wt" compile "$module" -o "$null" 2>&1];
         is( system($compile), 0, "$name compiles" ) or diag qx[$compile];
         my $got = qx["$wt" run --invoke _BROCKEN_ENTRY "$module" 1024 2>$null];

@@ -37,7 +37,10 @@ sub validates ( $src, $name ) {
     my $module = eval { $brocken->compile($src) };
     if ($@) { fail("$name: compile died: $@"); return }
     my $file = temp_path('wasm_list') . '.wasm';
-    Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
+
+    # The instance's own linker already carries the rodata `compile` interned (the runtime's strings), so a bare
+    # `Linker::Wasm->new` would fail to resolve them.
+    $brocken->linker->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
 SKIP: {
         skip 'no wasm binary runner available', 1 unless $runner;
         my $status = $runner eq 'wasmtime' ? system(qq["$wasmtime" compile "$file" -o "$null" 2>&1]) :
