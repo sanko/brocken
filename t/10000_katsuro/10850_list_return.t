@@ -123,7 +123,7 @@ sub make_list() :returns(ptr) {
 my (f64 $a, f64 $b) = make_list();
 exit $a + $b;
 BROCKEN
-            [ <<'BROCKEN', 9, 'an untyped element survives the return of its maker' ],
+            [ <<'BROCKEN', 9, 'an untyped element survives the return of its maker' ]
 sub make_list() :returns(ptr) {
     my $u = 7;
     return ($u, 2);

@@ -9,16 +9,14 @@ use Test2::Tools::Brocken qw[answers executable_targets];
 # Each attribute also accepts an explicit name in parentheses, `:param(name)` / `:reader(name)` / `:writer(name)`,
 # and `:accessor(name)` names its reader (the writer is `set_` + that name).
 subtest 'leading underscore is stripped from default names' => sub {
-    answers( 'class P { field i64 $_x :param :reader; } my ptr $p = P->new(x => 42); exit $p->x();', 42,
-        'new(x => ...) sets $_x and x() reads it' );
+    answers( 'class P { field i64 $_x :param :reader; } my ptr $p = P->new(x => 42); exit $p->x();', 42, 'new(x => ...) sets $_x and x() reads it' );
     answers( 'class C { field i64 $_count :param :writer; } my ptr $c = C->new(count => 1); $c->set_count(9); exit $c->_count;',
         9, 'set_count() is the default writer for $_count' );
     answers( 'class D { field i64 $__bar :param; } my ptr $d = D->new(_bar => 5); exit $d->__bar;',
         5, 'only one underscore is stripped: $__bar -> param _bar' );
 };
 subtest 'custom accessor names via payloads' => sub {
-    answers( 'class P { field i64 $x :param :reader(get_x); } my ptr $p = P->new(x => 7); exit $p->get_x();',
-        7, ':reader(get_x) generates get_x()' );
+    answers( 'class P { field i64 $x :param :reader(get_x); } my ptr $p = P->new(x => 7); exit $p->get_x();', 7, ':reader(get_x) generates get_x()' );
     answers( 'class P { field i64 $x :param :writer(write_x); } my ptr $p = P->new(x => 1); $p->write_x(5)->write_x(6); exit $p->x;',
         6, ':writer(write_x) generates write_x and chains' );
     answers( 'class V { field i64 $v :param :accessor(get_v); } my ptr $x = V->new(v => 3); $x->set_get_v(4); exit $x->get_v();',

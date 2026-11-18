@@ -26,7 +26,7 @@ subtest 'delete returns the value it removed' => sub {
 
 # The entry is gone afterwards, and only that entry.
 subtest 'delete removes exactly one entry' => sub {
-    run_case( 'my %h; %h{"k"} = 1; delete %h{"k"}; if (exists %h{"k"}) { exit 1; } exit 0;',         0, 'the deleted key no longer exists' );
+    run_case( 'my %h; %h{"k"} = 1; delete %h{"k"}; if (exists %h{"k"}) { exit 1; } exit 0;',           0, 'the deleted key no longer exists' );
     run_case( 'my %h; %h{"a"} = 1; %h{"b"} = 2; %h{"c"} = 3; delete %h{"b"}; exit %h{"a"} + %h{"c"};', 4, 'the other keys survive' );
     run_case( 'my %h; %h{"a"} = 1; %h{"b"} = 2; delete %h{"a"}; if (exists %h{"a"}) { exit 1; } if (!exists %h{"b"}) { exit 2; } exit 3;',
         3, 'the deleted key is gone while its neighbour remains' );

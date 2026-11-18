@@ -14,7 +14,7 @@ sub answers ( $source, $want, $label ) { Test2::Tools::Brocken::answers( $source
 subtest 'undef is the undefined value' => sub {
     answers( 'my Any $x = undef; exit defined($x) ? 1 : 0;', 0, 'an Any initialised with undef is undefined' );
     answers( 'exit defined(undef) ? 1 : 0;',                 0, 'the undef literal is undefined' );
-    answers( 'if (undef) { exit 1; } exit 0;',             0, 'undef is false in a condition' );
+    answers( 'if (undef) { exit 1; } exit 0;',               0, 'undef is false in a condition' );
 };
 subtest 'assigning undef clears a managed or native slot' => sub {
     answers( 'my Any $x = 5; $x = undef; exit defined($x) ? 1 : 0;',       0, 'an Any slot becomes undefined' );
@@ -62,8 +62,8 @@ subtest 'undef empties an Any array' => sub {
 };
 subtest 'undef empties a hash' => sub {
     answers( 'my %h; %h{"a"}=1; %h{"b"}=2; undef %h; for my $k (keys %h) { exit 1; } exit 2;', 2, 'no key remains after undef' );
-    answers( 'my %h; %h{"a"}=1; undef %h; exit defined(%h{"a"}) ? 1 : 0;',                       0, 'a cleared entry reads as undefined' );
-    answers( 'my %h; %h{"a"}=1; undef %h; %h{"b"}=5; exit %h{"b"};',                             5, 'the hash stays usable after undef' );
+    answers( 'my %h; %h{"a"}=1; undef %h; exit defined(%h{"a"}) ? 1 : 0;',                     0, 'a cleared entry reads as undefined' );
+    answers( 'my %h; %h{"a"}=1; undef %h; %h{"b"}=5; exit %h{"b"};',                           5, 'the hash stays usable after undef' );
     answers( 'my %h; %h{"a"}="x"; %h{"b"}="y"; undef %h; exit 3;', 3, 'clearing a hash with string values does not crash' );
 };
 subtest 'undef appears in a list' => sub {

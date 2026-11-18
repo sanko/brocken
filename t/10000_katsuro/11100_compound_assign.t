@@ -57,16 +57,14 @@ subtest 'compound assignment on a hash element' => sub {
     native_case( 'my %h; %h{"k"} += 4; if (%h{"k"} == 4) { exit 1; } exit 0;',                1, 'an absent key starts from undef' );
 };
 subtest 'string compound assignment' => sub {
-    native_case( 'my String $s = "a"; $s .= "b"; exit $s eq "ab" ? 1 : 0;',                       1, 'String .=' );
+    native_case( 'my String $s = "a"; $s .= "b"; exit $s eq "ab" ? 1 : 0;',                     1, 'String .=' );
     native_case( 'my Any $s = "x"; $s .= "y"; $s .= "z"; if ($s eq "xyz") { exit 1; } exit 0;', 1, 'Any .= chained' );
 };
 subtest 'compound assignment on a field' => sub {
     native_case(
-        'class P { field i64 $x : param = 0;' .
-            ' method bump() :returns(i64) { $x += 5; return $x; } }' .
-            ' my ptr $p = P->new(); exit $p->bump();',
+        'class P { field i64 $x : param = 0;' . ' method bump() :returns(i64) { $x += 5; return $x; } }' . ' my ptr $p = P->new(); exit $p->bump();',
         5,
-        'a bare field name as the compound target',
+        'a bare field name as the compound target'
     );
 };
 done_testing;

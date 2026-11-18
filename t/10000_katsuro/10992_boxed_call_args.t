@@ -29,8 +29,7 @@ subtest 'an Any argument to a raw ptr parameter is unboxed' => sub {
 };
 subtest 'an Any argument to a method parameter is converted too' => sub {
     answers_native(
-        'class C { method slen(String $s) :returns(i64) { return length($s); } }' .
-            ' my ptr $c = C->new(); my $any = "hello!"; exit $c->slen($any);',
+        'class C { method slen(String $s) :returns(i64) { return length($s); } }' . ' my ptr $c = C->new(); my $any = "hello!"; exit $c->slen($any);',
         6,
         'a method user argument is unboxed the same way as a plain call argument'
     );

@@ -139,13 +139,13 @@ BROCKEN
 };
 subtest '.eh_frame_hdr structure validation' => sub {
     my $dwarf = Brocken::Jenny::Linker::DWARF->new(
-        source_locs   => [ { offset => 0, line => 1 }, { offset => 12, line => 2 }, ],
+        source_locs   => [ { offset => 0, line => 1 }, { offset => 12, line => 2 } ],
         text_base     => 0x400000,
         source_file   => 'test_eh.brocken',
-        func_ranges   => [ { name => 'main', start => 0, end => 24 }, { name => 'helper', start => 32, end => 64 }, ],
+        func_ranges   => [ { name => 'main', start => 0, end => 24 }, { name => 'helper', start => 32, end => 64 } ],
         debug         => 3,
         eh_frame_base => 1,
-        arch          => 'x64',
+        arch          => 'x64'
     );
     ok( 1, 'DWARF object created with eh_frame_base set' );
     my $sections = $dwarf->build_all;
@@ -181,7 +181,7 @@ subtest '.eh_frame_hdr absent when eh_frame_base is 0' => sub {
         func_ranges   => [ { name => 'main', start => 0, end => 8 } ],
         debug         => 3,
         eh_frame_base => 0,
-        arch          => 'x64',
+        arch          => 'x64'
     );
     my $sections = $dwarf->build_all;
     ok( !exists $sections->{'.eh_frame_hdr'}, '.eh_frame_hdr absent when eh_frame_base is 0' );
@@ -193,19 +193,19 @@ subtest 'Multi-file line program emits DW_LNS_set_file' => sub {
             { offset => 0,  line => 1, file => 'a.brocken' },
             { offset => 12, line => 2, file => 'a.brocken' },
             { offset => 24, line => 1, file => 'b.brocken' },
-            { offset => 36, line => 2, file => 'b.brocken' },
+            { offset => 36, line => 2, file => 'b.brocken' }
         ],
         text_base    => 0x400000,
         source_file  => 'a.brocken',
         source_files => [ 'a.brocken', 'b.brocken' ],
         func_ranges  => [
             { name => 'fn_a', start => 0,  end => 20, source_file => 'a.brocken' },
-            { name => 'fn_b', start => 24, end => 48, source_file => 'b.brocken' },
+            { name => 'fn_b', start => 24, end => 48, source_file => 'b.brocken' }
         ],
         class_info => {},
         arch       => 'x86_64',
         platform   => 'linux',
-        debug      => 5,
+        debug      => 5
     );
     my $sections = $dwarf->build_all;
     ok( exists $sections->{'.debug_line'}, '.debug_line section present with multiple files' );

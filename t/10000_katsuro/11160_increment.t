@@ -26,8 +26,8 @@ subtest 'float slots step by one' => sub {
     answers( 'my f64 $f = 1.5; ++$f; exit ($f == 2.5) ? 1 : 0;',        1, 'prefix increment of a float' );
     answers( 'my f64 $f = 1.5; $f++; exit ($f == 2.5) ? 1 : 0;',        1, 'postfix increment of a float' );
     answers( 'my f64 $f = 1.5; $f--; --$f; exit ($f == -0.5) ? 1 : 0;', 1, 'decrement of a float' );
-    answers( 'my f64 $f = 1.5; my f64 $g = $f++; exit ($g == 1.5 && $f == 2.5) ? 1 : 0;',
-        1, 'postfix float yields the pre-value and steps the slot' );
+    answers( 'my f64 $f = 1.5; my f64 $g = $f++; exit ($g == 1.5 && $f == 2.5) ? 1 : 0;', 1,
+        'postfix float yields the pre-value and steps the slot' );
 };
 subtest 'Any slots step numerically' => sub {
     answers( 'my Any $x = 5; my Any $y = $x++; exit $y + $x;', 11, 'Any postfix increment' );
@@ -106,14 +106,12 @@ subtest 'field and array-element targets' => sub {
     answers( 'class Counter { field i64 $n :param; } my ptr $c = Counter->new(n => 4); ++$c->n; exit $c->n;',
         5, 'a field prefix increments the field' );
     answers(
-        'class Counter { field i64 $n :param; method bump() :returns(i64) { return $n++; } }' .
-            ' my ptr $c = Counter->new(n => 7); exit $c->bump();',
+        'class Counter { field i64 $n :param; method bump() :returns(i64) { return $n++; } }' . ' my ptr $c = Counter->new(n => 7); exit $c->bump();',
         7,
         'a bare field name in a method body is an lvalue'
     );
-    answers( 'class Box { field Any $v :param; } my ptr $b = Box->new(v => 9); $b->v++; exit $b->v;', 10,
-        'an Any field steps through the runtime' );
-    answers( 'my [i64; 3] @a; @a[1] = 10; @a[1]++; exit @a[1];',                 11, 'an inline array element steps in place' );
+    answers( 'class Box { field Any $v :param; } my ptr $b = Box->new(v => 9); $b->v++; exit $b->v;', 10, 'an Any field steps through the runtime' );
+    answers( 'my [i64; 3] @a; @a[1] = 10; @a[1]++; exit @a[1];',                                      11, 'an inline array element steps in place' );
     answers( 'my [Any; 1] @a; @a[0] = 5; @a[0]++; exit @a[0];',                  6,  'an owned Any element steps through the runtime' );
     answers( 'my [Any; 1] @a; @a[0] = 5; my Any $y = @a[0]++; exit $y + @a[0];', 11, 'postfix on an Any element yields the pre-value' );
 };

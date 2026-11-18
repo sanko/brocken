@@ -46,8 +46,7 @@ subtest 'deleting a key unlinks it from the order' => sub {
 };
 subtest 'a key inserted after a delete goes to the tail' => sub {
     answers(
-        'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"b"}; %h{"d"}=4;' .
-            ' my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } exit $t;',
+        'my %h; %h{"a"}=1; %h{"b"}=2; %h{"c"}=3; delete %h{"b"}; %h{"d"}=4;' . ' my i64 $t=0; for my $k (keys %h) { $t = $t*10 + %h{$k}; } exit $t;',
         134,
         'the new key iterates last, after the surviving a and c'
     );

@@ -17,13 +17,12 @@ sub answers ( $source, $want, $label ) {
 subtest 'ceil rounds toward positive infinity' => sub {
     answers( 'sub f() :returns(i64) { if (builtin::ceil(2.5) == 3) { return 1; } return 0; } exit f();',   1, 'ceil(2.5) is 3' );
     answers( 'sub f() :returns(i64) { if (builtin::ceil(-2.5) == -2) { return 1; } return 0; } exit f();', 1, 'ceil(-2.5) is -2' );
-    answers( 'sub f() :returns(i64) { if (builtin::ceil(3.0) == 3) { return 1; } return 0; } exit f();', 1, 'ceil of an integral float is itself' );
+    answers( 'sub f() :returns(i64) { if (builtin::ceil(3.0) == 3) { return 1; } return 0; } exit f();',   1, 'ceil of an integral float is itself' );
 };
 subtest 'floor rounds toward negative infinity' => sub {
     answers( 'sub f() :returns(i64) { if (builtin::floor(2.5) == 2) { return 1; } return 0; } exit f();',   1, 'floor(2.5) is 2' );
     answers( 'sub f() :returns(i64) { if (builtin::floor(-2.5) == -3) { return 1; } return 0; } exit f();', 1, 'floor(-2.5) is -3' );
-    answers( 'sub f() :returns(i64) { if (builtin::floor(3.0) == 3) { return 1; } return 0; } exit f();',
-        1, 'floor of an integral float is itself' );
+    answers( 'sub f() :returns(i64) { if (builtin::floor(3.0) == 3) { return 1; } return 0; } exit f();', 1, 'floor of an integral float is itself' );
 };
 subtest 'rounding an integer is the identity' => sub {
     answers( 'sub f() :returns(i64) { return builtin::ceil(7); } exit f();',  7, 'ceil of an int' );
@@ -47,12 +46,11 @@ subtest 'nan is never equal to itself' => sub {
     answers( 'sub f() :returns(i64) { if (builtin::nan() == builtin::nan()) { return 1; } return 0; } exit f();', 0, 'nan() == nan() is false' );
 };
 subtest 'trim strips leading and trailing whitespace' => sub {
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("  hi  "); return length($s); } exit f();', 2, 'both ends' );
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("hi"); return length($s); } exit f();',     2, 'nothing to strip' );
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("   "); return length($s); } exit f();',    0, 'all whitespace is empty' );
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim(""); return length($s); } exit f();',       0, 'the empty string stays empty' );
-    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("\t x \n"); return length($s); } exit f();',
-        1, 'tab and newline are whitespace' );
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("  hi  "); return length($s); } exit f();',  2, 'both ends' );
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("hi"); return length($s); } exit f();',      2, 'nothing to strip' );
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("   "); return length($s); } exit f();',     0, 'all whitespace is empty' );
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim(""); return length($s); } exit f();',        0, 'the empty string stays empty' );
+    answers( 'sub f() :returns(i64) { my String $s = builtin::trim("\t x \n"); return length($s); } exit f();', 1, 'tab and newline are whitespace' );
 
     # The surfaces prove the boundary; this proves the interior survived untouched.
     answers( 'sub f() :returns(i64) { if (builtin::trim("  hi  ") eq "hi") { return 1; } return 0; } exit f();', 1, 'content preserved' );

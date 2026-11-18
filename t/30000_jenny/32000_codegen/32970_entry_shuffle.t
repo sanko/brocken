@@ -110,7 +110,7 @@ BROCKEN
         my $funcs  = $cross->codegen->emit_functions( $module->functions );
         my $out    = temp_path( 'shuffle_mixed' . $cross->ext );
         $cross->linker->write_executable( $out, $funcs, $target );
-        run_exec( $out, expected_exit => 42, platform => $target, name => "x86_64 SysV: $n interleaved integer/float argument(s)", );
+        run_exec( $out, expected_exit => 42, platform => $target, name => "x86_64 SysV: $n interleaved integer/float argument(s)" );
     }
 }
 done_testing;

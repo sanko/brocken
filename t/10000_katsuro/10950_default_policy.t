@@ -3,20 +3,20 @@ use blib;
 use Test::More;
 use Brocken;
 subtest 'set_default_policy sets class defaults' => sub {
-    Brocken->set_default_policy( fuel => 999, mem_limit => 5000, capabilities => 0x0F, );
+    Brocken->set_default_policy( fuel => 999, mem_limit => 5000, capabilities => 0x0F );
     my $c   = Brocken->new();
     my $mod = $c->compile(<<'BROCKEN');
 exit 0;
 BROCKEN
     ok( $mod, 'compiled with custom policy' );
-    Brocken->set_default_policy( fuel => 1000000, mem_limit => 0, capabilities => ~0, );
+    Brocken->set_default_policy( fuel => 1000000, mem_limit => 0, capabilities => ~0 );
 };
 subtest 'set_default_policy globals match' => sub {
-    Brocken->set_default_policy( fuel => 42, mem_limit => 1234, capabilities => 0xFF, );
+    Brocken->set_default_policy( fuel => 42, mem_limit => 1234, capabilities => 0xFF );
     is( $Brocken::default_fuel,         42,   'global fuel updated' );
     is( $Brocken::default_mem_limit,    1234, 'global mem_limit updated' );
     is( $Brocken::default_capabilities, 0xFF, 'global capabilities updated' );
-    Brocken->set_default_policy( fuel => 1000000, mem_limit => 0, capabilities => ~0, );
+    Brocken->set_default_policy( fuel => 1000000, mem_limit => 0, capabilities => ~0 );
 };
 subtest 'per-instance override' => sub {
     Brocken->set_default_policy( fuel => 500 );

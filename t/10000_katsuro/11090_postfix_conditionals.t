@@ -39,7 +39,7 @@ subtest 'postfix modifier on an assignment' => sub {
 # `if`/`while`/`for` need no `;`, so a following `if` starts a new statement. Wrapping is done only by the simple
 # statements, which is what keeps these two apart.
 subtest 'a compound statement does not swallow the next statement' => sub {
-    answers( 'my i64 $x = 0; if (false) { $x = 5; } if (true) { $x = 7; } exit $x;',              7, 'two ifs are two statements' );
+    answers( 'my i64 $x = 0; if (false) { $x = 5; } if (true) { $x = 7; } exit $x;',            7, 'two ifs are two statements' );
     answers( 'my i64 $i = 0; while ($i < 3) { $i = $i + 1; } if ($i == 3) { exit 1; } exit 0;', 1, 'an if after a while is a new statement' );
 };
 subtest 'postfix if on next' => sub {

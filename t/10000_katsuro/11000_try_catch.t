@@ -7,7 +7,7 @@ no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'try without catch/finally is a parse error' => sub {
     my $c = Brocken->new;
-    like( dies { $c->compile('try { exit 1; }') }, qr/catch.*finally/, 'try with neither catch nor finally croaks', );
+    like( dies { $c->compile('try { exit 1; }') }, qr/catch.*finally/, 'try with neither catch nor finally croaks' );
 };
 subtest 'try/catch with no throw - normal flow' => sub {
     my $brocken = Brocken->new();

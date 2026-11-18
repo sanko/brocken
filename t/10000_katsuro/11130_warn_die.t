@@ -61,10 +61,9 @@ subtest 'an uncaught die ends the process with status 255' => sub {
     native_case( 'my i64 $x = 0; die("no"); $x = 1; exit $x;', 255, 'no statement after die runs' );
 };
 subtest 'die unwinds to an enclosing catch' => sub {
-    native_case( 'my i64 $x = 0; try { die "x"; $x = 1; } catch ($e) { $x = 9; } exit $x;',
-        9, 'the rest of the try body is skipped once die raises' );
-    native_case( 'my i64 $x = 0; try { die "a"; } catch ($e) { $x = 1; } finally { $x = $x + 41; } exit $x;',
-        42, 'finally runs after a caught die' );
+    native_case( 'my i64 $x = 0; try { die "x"; $x = 1; } catch ($e) { $x = 9; } exit $x;', 9,
+        'the rest of the try body is skipped once die raises' );
+    native_case( 'my i64 $x = 0; try { die "a"; } catch ($e) { $x = 1; } finally { $x = $x + 41; } exit $x;', 42, 'finally runs after a caught die' );
 };
 subtest 'die from a callee' => sub {
     native_case( 'sub f() : returns(i64) { die "in f"; return 0; } exit f() + 1;', 255, 'a die in a callee ends the process' );

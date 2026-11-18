@@ -59,9 +59,9 @@ subtest 'defined in a ternary' => sub {
 # `if (true)` aborted codegen. `if`/`while`/ternary conditions now materialize a literal as a comparison, which is
 # also what a `defined` on a native scalar produces.
 subtest 'a constant condition branches correctly' => sub {
-    answers( 'if (true) { exit 1; } exit 0;',                                              1, 'if (true) takes the then branch' );
-    answers( 'if (false) { exit 1; } exit 0;',                                             0, 'if (false) skips the then branch' );
-    answers( 'if (false) { exit 1; } else { exit 2; }',                                    2, 'if (false) takes the else branch' );
+    answers( 'if (true) { exit 1; } exit 0;',                                                1, 'if (true) takes the then branch' );
+    answers( 'if (false) { exit 1; } exit 0;',                                               0, 'if (false) skips the then branch' );
+    answers( 'if (false) { exit 1; } else { exit 2; }',                                      2, 'if (false) takes the else branch' );
     answers( 'exit true ? 1 : 2;',                                                           1, 'a constant ternary picks the first arm' );
     answers( 'exit false ? 1 : 2;',                                                          2, 'a constant ternary picks the second arm' );
     answers( 'my i64 $i = 0; while (true) { $i = $i + 1; if ($i == 3) { last; } } exit $i;', 3, 'while (true) with a last' );

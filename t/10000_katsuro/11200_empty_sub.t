@@ -20,7 +20,7 @@ subtest 'an empty body is a callable definition' => sub {
         0, 'an empty String function returns undef' );
     answers( 'sub f() :returns(f64) { } sub m() :returns(i64) { return f() == 0.0 ? 1 : 0; } exit m();', 1, 'an empty f64 function returns 0.0' );
     answers( 'sub f() :returns(f32) { } sub m() :returns(i64) { return f() == 0.0 ? 1 : 0; } exit m();', 1, 'an empty f32 function returns 0.0' );
-    answers( 'sub f() :returns(bool) { } sub m() :returns(i64) { return f() ? 1 : 0; } exit m();', 0, 'an empty bool function returns false' );
+    answers( 'sub f() :returns(bool) { } sub m() :returns(i64) { return f() ? 1 : 0; } exit m();',       0, 'an empty bool function returns false' );
     answers( 'sub f() :returns(ptr) { } sub m() :returns(i64) { my ptr $p = f(); return defined($p) ? 1 : 0; } exit m();',
         0, 'an empty ptr function returns null' );
     answers(
@@ -46,10 +46,10 @@ subtest 'bare return in typed function returns zero or undef' => sub {
         0, 'bare return in dynamic returns undef' );
     answers( 'sub f() :returns(String) { return; } sub m() :returns(i64) { my String $s = f(); return defined($s) ? 1 : 0; } exit m();',
         0, 'bare return in String returns undef' );
-    answers( 'sub f() :returns(f64) { return; } sub m() :returns(i64) { return f() == 0.0 ? 1 : 0; } exit m();',
-        1, 'bare return in f64 returns 0.0' );
-    answers( 'sub f() :returns(f32) { return; } sub m() :returns(i64) { return f() == 0.0 ? 1 : 0; } exit m();',
-        1, 'bare return in f32 returns 0.0' );
+    answers( 'sub f() :returns(f64) { return; } sub m() :returns(i64) { return f() == 0.0 ? 1 : 0; } exit m();', 1,
+        'bare return in f64 returns 0.0' );
+    answers( 'sub f() :returns(f32) { return; } sub m() :returns(i64) { return f() == 0.0 ? 1 : 0; } exit m();', 1,
+        'bare return in f32 returns 0.0' );
     answers( 'sub f() :returns(bool) { return; } sub m() :returns(i64) { return f() ? 1 : 0; } exit m();', 0, 'bare return in bool returns false' );
     answers( 'sub f() :returns(ptr) { return; } sub m() :returns(i64) { my ptr $p = f(); return defined($p) ? 1 : 0; } exit m();',
         0, 'bare return in ptr returns null' );
@@ -79,8 +79,7 @@ subtest 'bare return in typed function returns zero or undef' => sub {
     );
 };
 subtest 'a prototype supplies the signature for its definition' => sub {
-    answers( 'sub f(); sub f() :returns(i64) { return 5; } sub m() :returns(i64) { return f(); } exit m();',
-        5, 'prototype first, definition after' );
+    answers( 'sub f(); sub f() :returns(i64) { return 5; } sub m() :returns(i64) { return f(); } exit m();', 5, 'prototype first, definition after' );
     answers( 'sub f() :returns(i64) { return 5; } sub f(); sub m() :returns(i64) { return f(); } exit m();',
         5, 'definition first, prototype after (the prototype must not clobber it)' );
 };

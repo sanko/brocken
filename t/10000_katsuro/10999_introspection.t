@@ -43,10 +43,10 @@ subtest 'created_as_number and created_as_string' => sub {
     chk( 'sub f() :returns(i64) { my String $s = "hi"; return builtin::created_as_number($s); } exit f();',
         0, 'a string was not created as a number' );
     chk( 'sub f() :returns(i64) { my String $s = "hi"; return builtin::created_as_string($s); } exit f();', 1, 'a string was created as a string' );
-    chk( 'sub f() :returns(i64) { my i64 $n = 5; return builtin::created_as_string($n); } exit f();', 0, 'an int was not created as a string' );
+    chk( 'sub f() :returns(i64) { my i64 $n = 5; return builtin::created_as_string($n); } exit f();',       0, 'an int was not created as a string' );
     chk( 'sub f() :returns(i64) { my Any $n = 5; return builtin::created_as_number($n); } exit f();', 1, 'a boxed int was created as a number' );
-    chk( 'sub f() :returns(i64) { my Any $s = "hi"; return builtin::created_as_string($s); } exit f();',
-        1, 'a boxed string was created as a string' );
+    chk( 'sub f() :returns(i64) { my Any $s = "hi"; return builtin::created_as_string($s); } exit f();', 1,
+        'a boxed string was created as a string' );
 };
 subtest 'refaddr answers a non-zero address for a boxed value' => sub {
     chk( 'sub f() :returns(i64) { my Any $n = 5; my u64 $a = builtin::refaddr($n); if ($a > 1000) { return 1; } return 0; } exit f();',

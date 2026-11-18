@@ -7,7 +7,7 @@ no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'build IR function with arithmetic' => sub {
     my $builder = Brocken::Lindsay::IR::Builder->new();
-    my $func    = Brocken::Lindsay::IR::Function->new( name => 'test', return_type => Brocken::Lindsay::IR::Type::i32(), );
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'test', return_type => Brocken::Lindsay::IR::Type::i32() );
     my $block   = $func->append_block('entry');
     $builder->position_at_end($block);
     my $lhs = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 10 );
@@ -20,7 +20,7 @@ subtest 'build IR function with arithmetic' => sub {
 };
 subtest 'build IR function with control flow' => sub {
     my $builder = Brocken::Lindsay::IR::Builder->new();
-    my $func    = Brocken::Lindsay::IR::Function->new( name => 'iftest', return_type => Brocken::Lindsay::IR::Type::i32(), );
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'iftest', return_type => Brocken::Lindsay::IR::Type::i32() );
     my $entry   = $func->append_block('entry');
     my $then    = $func->append_block('then');
     my $else_b  = $func->append_block('else');
@@ -49,7 +49,7 @@ subtest 'build IR function with control flow' => sub {
 subtest 'build IR module' => sub {
     my $module  = Brocken::Lindsay::IR::Module->new( name => 'testmod' );
     my $builder = Brocken::Lindsay::IR::Builder->new();
-    my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), );
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
     my $block   = $func->append_block('entry');
     $builder->position_at_end($block);
     my $c = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 );

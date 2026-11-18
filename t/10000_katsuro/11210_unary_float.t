@@ -28,7 +28,7 @@ subtest 'double negation round-trips' => sub {
     answers( 'my $x = 7; my $r = -(-$x); exit $r == 7 ? 1 : 0;',     1, 'an int survives two negations' );
 };
 subtest 'the negated result is usable in comparisons and slots' => sub {
-    answers( 'my $x = 3.5; my $r = -$x; if ($r) { exit 1; } exit 0;',                      1, 'a negated float is truthy' );
+    answers( 'my $x = 3.5; my $r = -$x; if ($r) { exit 1; } exit 0;',                        1, 'a negated float is truthy' );
     answers( 'my $x = 3.5; my $r = -$x; my f64 $y = $r; exit $y == -3.5 ? 1 : 0;',           1, 'it stores into a typed f64 slot' );
     answers( 'my $x = 3.5; my $r = -$x; my i64 $n = $r; exit $n == -3 ? 1 : 0;',             1, 'storing into an i64 truncates toward zero' );
     answers( 'my $x = 3.5; my $r = -$x; my f64 $y = 0.0; $y = $r; exit $y == -3.5 ? 1 : 0;', 1, 'it assigns into a typed f64 slot' );

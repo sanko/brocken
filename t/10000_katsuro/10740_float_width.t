@@ -45,7 +45,7 @@ subtest 'a float of one width cannot be stored in a slot of the other' => sub {
     # rather than silently reinterpreted: the value is loaded, so there is nothing to re-tag.
     for my $case (
         [ 'my f64 $a = 1.5; my f32 $t = $a; exit 0;', 'f64 loaded into an f32 slot' ],
-        [ 'my f32 $a = 1.5; my f64 $t = $a; exit 0;', 'f32 loaded into an f64 slot' ],
+        [ 'my f32 $a = 1.5; my f64 $t = $a; exit 0;', 'f32 loaded into an f64 slot' ]
     ) {
         my ( $src, $name ) = @$case;
         my $module = eval { Brocken->new->compile($src) };

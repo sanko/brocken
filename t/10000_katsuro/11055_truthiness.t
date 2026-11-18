@@ -45,8 +45,8 @@ subtest 'a boxed string is false only when empty or "0"' => sub {
 
 # A missing key yields a null box, which must read as false rather than dereferencing address zero.
 subtest 'a null box is false, not a fault' => sub {
-    run_case( 'my %h; if (%h{"missing"}) { exit 1; } exit 0;',                               0, 'a missing key (null box) is false' );
-    run_case( 'my Any $a; if ($a) { exit 1; } exit 0;',                                      0, 'if (null_any) is false' );
+    run_case( 'my %h; if (%h{"missing"}) { exit 1; } exit 0;',                             0, 'a missing key (null box) is false' );
+    run_case( 'my Any $a; if ($a) { exit 1; } exit 0;',                                    0, 'if (null_any) is false' );
     run_case( 'my Any $a; my Any $b = 5; if ($a) { exit 1; } if ($b) { exit 2; } exit 0;', 2, 'a later true box is still reached' );
 };
 
@@ -63,8 +63,8 @@ subtest 'unary ! follows the same truthiness' => sub {
 subtest 'a boxed condition drives a while loop' => sub {
     run_case( 'my %h; %h{"s"} = "x"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; if ($n == 3) { %h{"s"} = ""; } } exit $n;',
         3, 'the loop runs while the box is true' );
-    run_case( 'my %h; %h{"s"} = "0"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; %h{"s"} = ""; } exit $n;',
-        0, 'a false box never enters the body' );
+    run_case( 'my %h; %h{"s"} = "0"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; %h{"s"} = ""; } exit $n;', 0,
+        'a false box never enters the body' );
 };
 
 # A boolean expression stored into the hash is a box too, and reads back by the same rule.

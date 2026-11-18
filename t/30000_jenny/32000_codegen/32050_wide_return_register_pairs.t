@@ -23,7 +23,7 @@ my %lowerer_for = (
     'x86_64-pc-linux-gnu'       => 'Brocken::Jenny::Lowerer::X86_64',
     'x86_64-pc-windows-msvc'    => 'Brocken::Jenny::Lowerer::X86_64',
     'aarch64-unknown-linux-gnu' => 'Brocken::Jenny::Lowerer::ARM64',
-    'riscv64-unknown-linux-gnu' => 'Brocken::Jenny::Lowerer::RISCV64',
+    'riscv64-unknown-linux-gnu' => 'Brocken::Jenny::Lowerer::RISCV64'
 );
 is( [ Brocken::Katsuro::Platform::ABI->new->return_pair_registers ],                             [], 'the base ABI names no wide return pair' );
 is( [ Brocken::Katsuro::Platform::ABI->new->param_pair_registers(0) ],                           [], 'the base ABI names no wide parameter pair' );

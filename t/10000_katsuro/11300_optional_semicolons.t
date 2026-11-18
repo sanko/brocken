@@ -83,7 +83,7 @@ sub check_output ( $src, $want, $name ) {
 }
 subtest 'a final say may omit its semicolon' => sub {
     check_output( q{sub f() { say "hi" } f(); exit 0;}, "hi\n", 'a final say inside a sub body' );
-    check_output( q{say "hi"},                            "hi\n", 'a final say at the top level' );
+    check_output( q{say "hi"},                          "hi\n", 'a final say at the top level' );
     check_output( q{sub render() { return 'blah' } say render; exit 0;},
         "blah\n", 'the motivating string-returning sub without a trailing semicolon' );
     check_output(

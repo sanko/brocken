@@ -75,7 +75,7 @@ subtest 'calls with the right arity still work' => sub {
     answers( 'sub main2() :returns(i64) { say("a", "b"); return 9; } exit main2();', 9, 'say stays variadic (any number of arguments)' );
 };
 subtest 'a default may reference an earlier parameter' => sub {
-    answers( 'sub f($a, $b = $a + 1) :returns(i64) { return $a * 10 + $b; } exit f(1);',
-        12, 'the default is computed with the first argument bound' );
+    answers( 'sub f($a, $b = $a + 1) :returns(i64) { return $a * 10 + $b; } exit f(1);', 12,
+        'the default is computed with the first argument bound' );
 };
 done_testing;

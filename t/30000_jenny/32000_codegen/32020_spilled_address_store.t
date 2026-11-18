@@ -124,7 +124,7 @@ subtest 'A sum of many spilled arguments comes back intact' => sub {
         $out,
         expected_exit => expected_sum($n),
         platform      => $host,
-        name          => "$n arguments summing to " . expected_sum($n) . " on $host->friendly",
+        name          => "$n arguments summing to " . expected_sum($n) . " on $host->friendly"
     );
 };
 subtest 'Foreign targets execute the same sum' => sub {
@@ -143,7 +143,7 @@ subtest 'Foreign targets execute the same sum' => sub {
                 $out,
                 expected_exit => expected_sum($n),
                 platform      => $platform,
-                name          => "$n arguments summing to " . expected_sum($n) . " on $platform->friendly",
+                name          => "$n arguments summing to " . expected_sum($n) . " on $platform->friendly"
             );
         }
     }

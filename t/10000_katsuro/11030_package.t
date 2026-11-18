@@ -91,9 +91,7 @@ subtest 'sibling calls resolve within the package' => sub {
 subtest 'block form scopes the prefix' => sub {
     answers(
         'sub outside() :returns(i64) { return 9; } package Scope { sub outside() :returns(i64) { return 5; } } exit outside() + Scope::outside();',
-        14,
-        'the block name and the top-level name coexist'
-    );
+        14, 'the block name and the top-level name coexist' );
     answers( 'package P { sub inside() :returns(i64) { return 6; } } exit P::inside();', 6, 'a packaged sub is reachable by its qualified name' );
 };
 subtest 'classes and methods inside a package' => sub {
