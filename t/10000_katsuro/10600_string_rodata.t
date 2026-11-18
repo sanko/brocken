@@ -12,11 +12,13 @@ subtest 'String constant compiles and produces RodataRef in IR' => sub {
         exit 42;
         BROCKEN
     my $rodata = $module->rodata;
-    is $rodata,                    D(), 'module has rodata hash';
-    is scalar( keys $rodata->%* ), 1,   'one string constant in rodata';
-    my ( $label, $bytes ) = each $rodata->%*;
+    is $rodata, D(), 'module has rodata hash';
+
+    # The module's rodata also carries the core runtime's own literals (`malloc`, `write`, the backtrace strings, ...),
+    # so the user's literal is located by its bytes rather than assumed to be the only entry.
+    my ($label) = grep { $rodata->{$_} eq "hello\0" } keys $rodata->%*;
+    ok defined $label, 'the "hello" literal is interned with a null terminator';
     like $label, qr/^__str_[0-9a-f]{32}$/, 'label is a content-derived __str_<md5> name';
-    is $bytes, "hello\0", 'bytes include null terminator';
     my $funcs = $module->functions;
     ok scalar $funcs->@* > 0, 'at least one function in module';
     my $func = $funcs->[0];

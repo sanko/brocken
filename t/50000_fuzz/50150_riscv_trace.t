@@ -33,27 +33,27 @@ sub test_prog {
 #   $v2 = $v1 << $v1;     # 31<<31 -> i16: 0
 #   $v1 = $v1 / $v3;      # 31/41 = 0 (i8)
 #   $v3 = $v3 << $v1;     # 41<<0 = 41 (i32)
-#   return $v4;           # 31
+#   exit $v4;           # 31
 #
 # Expected exit codes (final & 0xFF):
-#   1. init:        return v4=4   -> 4
-#   2. after mul:   return v2=3600 -> 16
-#   3. after xor:   return v4=0   -> 0
-#   4. after neg:   return v4=31  -> 31
-#   5. after or:    return v1=31  -> 31  (i8)
-#   6. after shl:   return v2=0   -> 0   (i16)
-#   7. after div:   return v1=0   -> 0   (i8)
-#   8. after shl:   return v3=41  -> 41  (i32)
-#   9. final:       return v4=31  -> 31
+#   1. init:        exit v4=4   -> 4
+#   2. after mul:   exit v2=3600 -> 16
+#   3. after xor:   exit v4=0   -> 0
+#   4. after neg:   exit v4=31  -> 31
+#   5. after or:    exit v1=31  -> 31  (i8)
+#   6. after shl:   exit v2=0   -> 0   (i16)
+#   7. after div:   exit v1=0   -> 0   (i8)
+#   8. after shl:   exit v3=41  -> 41  (i32)
+#   9. final:       exit v4=31  -> 31
 subtest 'step-by-step trace of fuzzer-generated program' => sub {
-    test_prog( '1 init: return v4', <<'PROG', 4 );
+    test_prog( '1 init: exit v4', <<'PROG', 4 );
 my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
 my i32 $v4 = 4;
 exit $v4;
 PROG
-    test_prog( '2 mul: return v2', <<'PROG', 3600 & 0xFF );
+    test_prog( '2 mul: exit v2', <<'PROG', 3600 & 0xFF );
 my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
@@ -61,7 +61,7 @@ my i32 $v4 = 4;
 $v2 = $v2 * $v2;
 exit $v2;
 PROG
-    test_prog( '3 xor: return v4', <<'PROG', 0 );
+    test_prog( '3 xor: exit v4', <<'PROG', 0 );
 my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
@@ -70,7 +70,7 @@ $v2 = $v2 * $v2;
 $v4 = $v2 ^ $v2;
 exit $v4;
 PROG
-    test_prog( '4 neg: return v4', <<'PROG', 31 );
+    test_prog( '4 neg: exit v4', <<'PROG', 31 );
 my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
@@ -80,7 +80,7 @@ $v4 = $v2 ^ $v2;
 $v4 = -$v1;
 exit $v4;
 PROG
-    test_prog( '5 or: return v1', <<'PROG', 31 );
+    test_prog( '5 or: exit v1', <<'PROG', 31 );
 my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
@@ -91,7 +91,7 @@ $v4 = -$v1;
 $v1 = $v4 | $v2;
 exit $v1;
 PROG
-    test_prog( '6 shl: return v2', <<'PROG', 0 );
+    test_prog( '6 shl: exit v2', <<'PROG', 0 );
 my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
@@ -103,7 +103,7 @@ $v1 = $v4 | $v2;
 $v2 = $v1 << $v1;
 exit $v2;
 PROG
-    test_prog( '7 div: return v1', <<'PROG', 0 );
+    test_prog( '7 div: exit v1', <<'PROG', 0 );
 my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
@@ -116,7 +116,7 @@ $v2 = $v1 << $v1;
 $v1 = $v1 / $v3;
 exit $v1;
 PROG
-    test_prog( '8 shl: return v3', <<'PROG', 41 );
+    test_prog( '8 shl: exit v3', <<'PROG', 41 );
 my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
@@ -130,7 +130,7 @@ $v1 = $v1 / $v3;
 $v3 = $v3 << $v1;
 exit $v3;
 PROG
-    test_prog( '9 final: return v4', <<'PROG', 31 );
+    test_prog( '9 final: exit v4', <<'PROG', 31 );
 my i8 $v1 = -31;
 my i16 $v2 = 60;
 my i32 $v3 = 41;
